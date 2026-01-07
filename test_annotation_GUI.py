@@ -295,7 +295,7 @@ class TestAnnotatorGUI:
             None
         """
         window = AnnotatorGUI()
-        assert window.windowTitle() == "Python Behavior Annotator (ChronoViz Style)"
+        assert window.windowTitle() == "Python Behavior Annotator"
         assert len(window.videos) == 0
         assert window.current_video_name is None
         assert len(window.behavior_types) == 3
@@ -1320,6 +1320,649 @@ class TestUIElements:
         gui.btn_play.click()
         QTest.qWait(100)
         assert gui.is_playing != initial_state
+
+
+class TestBehaviorTableEditing:
+    """Test behavior table editing functionality."""
+
+    def test_modify_behavior_name_in_table(self, gui):
+        """Test modifying a behavior name in the table.
+
+        Verifies that editing a behavior name in the table updates
+        all occurrences throughout the application.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        # Create a segment with original behavior name
+        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        gui.timeline.segments.append(seg)
+        gui.videos[gui.current_video_name]["segments"] = [seg]
+
+        # Find Immobility in the table (should be row 0)
+        old_name = "Immobility"
+        new_name = "Freezing"
+
+        # Get the item and modify it
+        name_item = gui.behavior_table.item(0, 0)
+        assert name_item.text() == old_name
+
+        # Simulate editing the cell
+        name_item.setText(new_name)
+        gui.on_behavior_table_changed(name_item)
+
+        # Verify behavior type list updated
+        assert new_name in gui.behavior_types
+        assert old_name not in gui.behavior_types
+
+        # Verify segment name updated
+        assert gui.timeline.segments[0].name == new_name
+
+        # Verify hotkey mapping updated
+        assert new_name in gui.behavior_hotkeys
+        assert old_name not in gui.behavior_hotkeys
+
+        # Verify legacy list updated
+        list_items = [
+            gui.behavior_list.item(i).text() for i in range(gui.behavior_list.count())
+        ]
+        assert any(new_name in item for item in list_items)
+        assert not any(old_name in item for item in list_items)
+
+    def test_modify_behavior_name_exports_correctly(self, gui, temp_csv):
+        """Test that modified behavior names export correctly to CSV.
+
+        Verifies that after renaming a behavior, the CSV export contains
+        the new name rather than the old one.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
+        # Create segment with original name
+        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        gui.timeline.segments.append(seg)
+        gui.videos[gui.current_video_name]["segments"] = [seg]
+
+        # Modify the behavior name in the table
+        new_name = "StandingStill"
+        name_item = gui.behavior_table.item(0, 0)
+        name_item.setText(new_name)
+        gui.on_behavior_table_changed(name_item)
+
+        # Export to CSV
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                gui.export_csv()
+
+        # Verify CSV contains new name
+        with open(temp_csv, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            assert len(rows) == 2  # Header + 1 segment
+            assert rows[1][1] == new_name
+            assert rows[1][1] != "Immobility"
+
+    def test_modify_hotkey_in_table(self, gui):
+        """Test modifying a hotkey in the table.
+
+        Verifies that editing a hotkey in the table updates the
+        hotkey mapping and allows the new key to trigger annotations.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        # Original hotkey for Immobility is 'I' (Qt.Key_I)
+        behavior = "Immobility"
+        old_key = Qt.Key_I
+        new_key_text = "M"
+        new_key = Qt.Key_M
+
+        # Verify original hotkey
+        assert gui.behavior_hotkeys[behavior] == old_key
+
+        # Modify hotkey in table (row 0, column 1)
+        hotkey_item = gui.behavior_table.item(0, 1)
+        hotkey_item.setText(new_key_text)
+        gui.on_behavior_table_changed(hotkey_item)
+
+        # Verify hotkey updated
+        assert gui.behavior_hotkeys[behavior] == new_key
+
+        # Verify legacy list shows new hotkey
+        list_items = [
+            gui.behavior_list.item(i).text() for i in range(gui.behavior_list.count())
+        ]
+        assert any(f"{behavior} ({new_key_text})" in item for item in list_items)
+
+        # Test that new hotkey works for annotation
+        QTest.keyPress(gui, new_key)
+        QTest.qWait(100)
+        assert len(gui.timeline.segments) == 1
+        assert gui.timeline.segments[0].name == behavior
+
+        QTest.keyRelease(gui, new_key)
+        QTest.qWait(100)
+        assert gui.timeline.segments[0].end_time is not None
+
+    def test_modify_hotkey_prevents_duplicates(self, gui):
+        """Test preventing duplicate hotkey assignment.
+
+        Verifies that assigning an already-used hotkey shows warning
+        and reverts to previous value.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        # Initial state: Immobility has 'I', Rear has 'R'
+        assert gui.behavior_hotkeys["Immobility"] == Qt.Key_I
+        assert gui.behavior_hotkeys["Rear"] == Qt.Key_R
+
+        # Try to assign 'I' to Rear (already used by Immobility)
+        rear_row = gui.behavior_types.index("Rear")
+
+        with patch("annotation_GUI.QMessageBox.warning") as mock_warning:
+            # Get the item and change it
+            hotkey_item = gui.behavior_table.item(rear_row, 1)
+            original_text = hotkey_item.text()
+            hotkey_item.setText("I")
+
+            # Trigger the change handler
+            gui.on_behavior_table_changed(hotkey_item)
+
+            # Should show warning
+            mock_warning.assert_called_once()
+            assert "already assigned" in mock_warning.call_args[0][2].lower()
+
+        # Hotkey should remain unchanged
+        assert gui.behavior_hotkeys["Rear"] == Qt.Key_R
+
+        # Item should be reverted to original text
+        assert hotkey_item.text() == original_text
+
+    def test_modify_behavior_name_prevents_duplicates(self, gui):
+        """Test preventing duplicate behavior names.
+
+        Verifies that renaming a behavior to an existing name shows
+        warning and reverts the change.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        # Try to rename Rear to Immobility (duplicate)
+        rear_row = gui.behavior_types.index("Rear")
+
+        with patch("annotation_GUI.QMessageBox.warning") as mock_warning:
+            # Get the item and change it
+            name_item = gui.behavior_table.item(rear_row, 0)
+            original_text = name_item.text()
+            name_item.setText("Immobility")
+
+            # Trigger the change handler
+            gui.on_behavior_table_changed(name_item)
+
+            # Should show warning
+            mock_warning.assert_called_once()
+            assert "already exists" in mock_warning.call_args[0][2].lower()
+
+        # Behavior should remain unchanged
+        assert "Rear" in gui.behavior_types
+        assert gui.behavior_types.count("Immobility") == 1
+
+        # Item should be reverted to original text
+        assert name_item.text() == original_text
+
+    def test_remove_hotkey_from_table(self, gui):
+        """Test removing a hotkey by clearing the cell.
+
+        Verifies that clearing a hotkey cell removes the hotkey mapping.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        behavior = "Immobility"
+        assert behavior in gui.behavior_hotkeys
+
+        # Clear the hotkey cell
+        hotkey_item = gui.behavior_table.item(0, 1)
+        hotkey_item.setText("")
+        gui.on_behavior_table_changed(hotkey_item)
+
+        # Verify hotkey was removed
+        assert behavior not in gui.behavior_hotkeys
+
+        # Verify legacy list shows no hotkey
+        list_items = [
+            gui.behavior_list.item(i).text() for i in range(gui.behavior_list.count())
+        ]
+        # Should just be the behavior name without parentheses
+        matching_items = [item for item in list_items if behavior in item]
+        assert len(matching_items) > 0
+        assert all("(" not in item for item in matching_items)
+
+    def test_invalid_hotkey_rejected(self, gui):
+        """Test rejecting invalid hotkey input.
+
+        Verifies that multi-character or invalid hotkeys are rejected
+        with appropriate warning message.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        rear_row = gui.behavior_types.index("Rear")
+        original_hotkey = gui.behavior_hotkeys["Rear"]
+
+        # Test multi-character input
+        with patch("annotation_GUI.QMessageBox.warning") as mock_warning:
+            hotkey_item = gui.behavior_table.item(rear_row, 1)
+            original_text = hotkey_item.text()
+            hotkey_item.setText("ABC")
+
+            gui.on_behavior_table_changed(hotkey_item)
+
+            mock_warning.assert_called_once()
+            assert "single letter" in mock_warning.call_args[0][2].lower()
+
+        # Hotkey should remain unchanged
+        assert gui.behavior_hotkeys["Rear"] == original_hotkey
+
+        # Item should be reverted
+        assert hotkey_item.text() == original_text
+
+    def test_empty_behavior_name_rejected(self, gui):
+        """Test rejecting empty behavior name.
+
+        Verifies that empty or whitespace-only behavior names are
+        rejected with warning.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        rear_row = gui.behavior_types.index("Rear")
+
+        # Try to set empty name
+        with patch("annotation_GUI.QMessageBox.warning") as mock_warning:
+            name_item = gui.behavior_table.item(rear_row, 0)
+            original_text = name_item.text()
+            name_item.setText("")
+
+            gui.on_behavior_table_changed(name_item)
+
+            mock_warning.assert_called_once()
+            assert "cannot be empty" in mock_warning.call_args[0][2].lower()
+
+        # Behavior should remain unchanged
+        assert "Rear" in gui.behavior_types
+
+        # Item should be reverted
+        assert name_item.text() == original_text
+
+    def test_modify_multiple_behaviors_and_export(self, gui, temp_csv):
+        """Test modifying multiple behaviors and exporting.
+
+        Verifies that multiple simultaneous modifications to behavior
+        names and hotkeys all persist correctly in CSV export.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
+        # Create segments for all default behaviors
+        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg2 = BehaviorSegment("Rear", 3.0, 4.0, 90, 120)
+        seg3 = BehaviorSegment("Groom", 5.0, 6.0, 150, 180)
+        gui.timeline.segments.extend([seg1, seg2, seg3])
+        gui.videos[gui.current_video_name]["segments"] = [seg1, seg2, seg3]
+
+        # Modify all behavior names
+        new_names = {0: "Freeze", 1: "RearUp", 2: "SelfGroom"}
+
+        for row, new_name in new_names.items():
+            name_item = gui.behavior_table.item(row, 0)
+            name_item.setText(new_name)
+            gui.on_behavior_table_changed(name_item)
+
+        # Modify all hotkeys
+        new_hotkeys = {0: "F", 1: "U", 2: "S"}
+
+        for row, new_key in new_hotkeys.items():
+            hotkey_item = gui.behavior_table.item(row, 1)
+            hotkey_item.setText(new_key)
+            gui.on_behavior_table_changed(hotkey_item)
+
+        # Export to CSV
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                gui.export_csv()
+
+        # Verify CSV contains all new names
+        with open(temp_csv, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            assert len(rows) == 4  # Header + 3 segments
+
+            exported_behaviors = {row[1] for row in rows[1:]}
+            assert exported_behaviors == {"Freeze", "RearUp", "SelfGroom"}
+
+            # Verify old names are not present
+            assert "Immobility" not in exported_behaviors
+            assert "Rear" not in exported_behaviors
+            assert "Groom" not in exported_behaviors
+
+    def test_modify_behavior_updates_all_video_segments(self, gui, tmp_path):
+        """Test that modifying a behavior updates segments across all videos.
+
+        Verifies that renaming a behavior updates segments in all loaded
+        videos, not just the current one.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            tmp_path: pytest fixture providing temporary directory path.
+
+        Returns:
+            None
+        """
+        # Add segment to first video
+        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        gui.timeline.segments.append(seg1)
+
+        # Create and load second video
+        video2_path = tmp_path / "video2.mp4"
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out = cv2.VideoWriter(str(video2_path), fourcc, 30.0, (640, 480))
+        for i in range(150):
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            out.write(frame)
+        out.release()
+
+        with patch(
+            "annotation_GUI.QFileDialog.getOpenFileNames",
+            return_value=([str(video2_path)], ""),
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                gui.load_video()
+
+        # Add segment to second video
+        gui.video_list.setCurrentRow(1)
+        QTest.qWait(100)
+        seg2 = BehaviorSegment("Immobility", 3.0, 4.0, 90, 120)
+        gui.timeline.segments.append(seg2)
+
+        # Switch back to first video
+        gui.video_list.setCurrentRow(0)
+        QTest.qWait(100)
+
+        # Modify behavior name
+        new_name = "Frozen"
+        name_item = gui.behavior_table.item(0, 0)
+        name_item.setText(new_name)
+        gui.on_behavior_table_changed(name_item)
+
+        # Verify both videos have updated segments
+        for video_data in gui.videos.values():
+            for seg in video_data["segments"]:
+                if seg.start_time in [1.0, 3.0]:  # Our test segments
+                    assert seg.name == new_name
+
+    def test_modify_behavior_after_annotation_and_export(self, gui, temp_csv):
+        """Test the complete workflow: annotate, modify, export.
+
+        Verifies that annotations made with original behavior names
+        export with the modified names after editing the table.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
+        # Create annotation with original hotkey (I for Immobility)
+        QTest.keyPress(gui, Qt.Key_I)
+        QTest.qWait(100)
+        QTest.keyRelease(gui, Qt.Key_I)
+        QTest.qWait(100)
+
+        assert len(gui.timeline.segments) == 1
+        assert gui.timeline.segments[0].name == "Immobility"
+
+        # Now modify the behavior name
+        new_name = "NotMoving"
+        name_item = gui.behavior_table.item(0, 0)
+        name_item.setText(new_name)
+        gui.on_behavior_table_changed(name_item)
+
+        # Also change the hotkey
+        new_key = "N"
+        hotkey_item = gui.behavior_table.item(0, 1)
+        hotkey_item.setText(new_key)
+        gui.on_behavior_table_changed(hotkey_item)
+
+        # Create another annotation with the new hotkey
+        QTest.keyPress(gui, Qt.Key_N)
+        QTest.qWait(100)
+        QTest.keyRelease(gui, Qt.Key_N)
+        QTest.qWait(100)
+
+        assert len(gui.timeline.segments) == 2
+        assert gui.timeline.segments[0].name == new_name  # First annotation updated
+        assert (
+            gui.timeline.segments[1].name == new_name
+        )  # Second annotation has new name
+
+        # Export and verify
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                gui.export_csv()
+
+        with open(temp_csv, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            assert len(rows) == 3  # Header + 2 segments
+            assert all(row[1] == new_name for row in rows[1:])
+            assert not any(row[1] == "Immobility" for row in rows[1:])
+
+    def test_modify_behavior_preserves_color_mapping(self, gui):
+        """Test that modifying a behavior name preserves its color.
+
+        Verifies that after renaming a behavior, its segments maintain
+        the same color on the timeline.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        # Create segment and record its color
+        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        gui.timeline.segments.append(seg)
+        original_color = seg.color
+
+        # Modify behavior name
+        new_name = "StillBehavior"
+        name_item = gui.behavior_table.item(0, 0)
+        name_item.setText(new_name)
+        gui.on_behavior_table_changed(name_item)
+
+        # Verify segment color unchanged
+        assert seg.color == original_color
+
+        # Verify color mapping transferred
+        assert new_name in BehaviorSegment._color_map
+        assert BehaviorSegment._color_map[new_name] == original_color
+        assert "Immobility" not in BehaviorSegment._color_map
+
+    def test_number_keys_as_hotkeys(self, gui):
+        """Test that number keys can be assigned as hotkeys.
+
+        Verifies that numeric hotkeys (0-9) work correctly for
+        behavior annotation.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        # Assign number key as hotkey
+        hotkey_item = gui.behavior_table.item(0, 1)
+        hotkey_item.setText("5")
+        gui.on_behavior_table_changed(hotkey_item)
+
+        # Verify hotkey assigned
+        assert gui.behavior_hotkeys["Immobility"] == Qt.Key_5
+
+        # Test annotation with number key
+        QTest.keyPress(gui, Qt.Key_5)
+        QTest.qWait(100)
+        assert len(gui.timeline.segments) == 1
+        assert gui.timeline.segments[0].name == "Immobility"
+
+        QTest.keyRelease(gui, Qt.Key_5)
+        QTest.qWait(100)
+        assert gui.timeline.segments[0].end_time is not None
+
+    def test_case_insensitive_hotkey_assignment(self, gui):
+        """Test that hotkey assignment is case-insensitive.
+
+        Verifies that lowercase letters are converted to uppercase
+        for consistent hotkey handling.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        # Assign lowercase letter
+        hotkey_item = gui.behavior_table.item(0, 1)
+        hotkey_item.setText("m")
+        gui.on_behavior_table_changed(hotkey_item)
+
+        # Verify stored as uppercase
+        assert gui.behavior_hotkeys["Immobility"] == Qt.Key_M
+
+        # Verify display shows uppercase (get fresh item after update)
+        updated_item = gui.behavior_table.item(0, 1)
+        assert updated_item.text() == "M"
+
+    def test_modify_behavior_with_active_annotation(self, gui):
+        """Test modifying behavior while an annotation is in progress.
+
+        Verifies that ongoing annotations are handled correctly when
+        the behavior is renamed mid-annotation.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        # Start an annotation
+        QTest.keyPress(gui, Qt.Key_I)
+        QTest.qWait(100)
+
+        assert len(gui.timeline.segments) == 1
+        assert gui.timeline.segments[0].end_time is None
+        assert gui.timeline.segments[0].name == "Immobility"
+
+        # Modify behavior name while annotation is ongoing
+        new_name = "ActiveImmobility"
+        name_item = gui.behavior_table.item(0, 0)
+        name_item.setText(new_name)
+        gui.on_behavior_table_changed(name_item)
+
+        # Verify ongoing annotation updated
+        assert gui.timeline.segments[0].name == new_name
+
+        # The active_hotkeys dict should also be updated
+        assert new_name in gui.active_hotkeys
+        assert gui.active_hotkeys[new_name] is not False
+
+        # Finish annotation (use the NEW hotkey now since mapping updated)
+        QTest.keyRelease(gui, Qt.Key_I)
+        QTest.qWait(100)
+
+        # Verify completed annotation has new name
+        assert gui.timeline.segments[0].name == new_name
+        assert gui.timeline.segments[0].end_time is not None
+
+    def test_behavior_table_synchronizes_with_add_delete(self, gui):
+        """Test that table stays synchronized when adding/deleting behaviors.
+
+        Verifies that the table correctly reflects behavior additions
+        and deletions, maintaining consistency with the behavior list.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
+        initial_row_count = gui.behavior_table.rowCount()
+
+        # Add a new behavior
+        with patch("annotation_GUI.QInputDialog.getText", return_value=("Walk", True)):
+            gui.add_new_behavior()
+
+        # Verify table updated
+        assert gui.behavior_table.rowCount() == initial_row_count + 1
+
+        # Check that "Walk" is in the table
+        found = False
+        for row in range(gui.behavior_table.rowCount()):
+            if gui.behavior_table.item(row, 0).text() == "Walk":
+                found = True
+                break
+        assert found
+
+        # Delete the behavior
+        with patch("annotation_GUI.QInputDialog.getItem", return_value=("Walk", True)):
+            with patch(
+                "annotation_GUI.QMessageBox.question", return_value=QMessageBox.Yes
+            ):
+                gui.delete_behavior()
+
+        # Verify table updated
+        assert gui.behavior_table.rowCount() == initial_row_count
+
+        # Check that "Walk" is no longer in the table
+        for row in range(gui.behavior_table.rowCount()):
+            assert gui.behavior_table.item(row, 0).text() != "Walk"
 
 
 if __name__ == "__main__":
