@@ -20,6 +20,10 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QInputDialog,
     QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QAbstractItemView,
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QRect, QPoint, QEvent
 from PyQt5.QtGui import (
@@ -592,13 +596,24 @@ class AnnotatorGUI(QMainWindow):
         self.btn_play = QPushButton("Play/Pause (Space)")
         self.btn_play.clicked.connect(self.toggle_play)
 
-        self.behavior_list = QListWidget()
-        self.update_behavior_list()
-        self.behavior_list.setFixedHeight(100)
-        self.behavior_list.installEventFilter(self)
+        # Behavior table
+        self.behavior_table = QTableWidget()
+        self.behavior_table.setColumnCount(2)
+        self.behavior_table.setHorizontalHeaderLabels(["Behavior Name", "Hotkey"])
+        self.behavior_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.Stretch
+        )
+        self.behavior_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeToContents
+        )
+        self.behavior_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.behavior_table.setFixedHeight(150)
+        self.behavior_table.itemChanged.connect(self.on_behavior_table_changed)
+        self.behavior_table.installEventFilter(self)
+        self.update_behavior_table()
 
         ctrl_layout.addWidget(self.btn_play)
-        ctrl_layout.addWidget(self.behavior_list)
+        ctrl_layout.addWidget(self.behavior_table)
         right_layout.addLayout(ctrl_layout)
 
         # Splitter
@@ -610,117 +625,153 @@ class AnnotatorGUI(QMainWindow):
 
         layout.addWidget(splitter)
 
-    def switch_video(
-        self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]
-    ) -> None:
-        """Switch to a different video from the video list.
+    def update_behavior_table(self) -> None:
+        """Update the behavior table with current behaviors and hotkeys.
 
-        Saves annotations for the previous video and loads the selected video
-        with its associated annotations.
+        Populates the table with editable behavior names and their assigned
+        keyboard shortcuts.
 
         Args:
-            current: The newly selected list item.
-            previous: The previously selected list item.
+            None
 
         Returns:
             None
         """
-        if current is None:
+        # Temporarily disconnect signal to avoid triggering during update
+        self.behavior_table.itemChanged.disconnect(self.on_behavior_table_changed)
+
+        self.behavior_table.setRowCount(len(self.behavior_types))
+
+        for idx, behavior in enumerate(self.behavior_types):
+            # Behavior name (editable)
+            name_item = QTableWidgetItem(behavior)
+            self.behavior_table.setItem(idx, 0, name_item)
+
+            # Hotkey (editable)
+            if behavior in self.behavior_hotkeys:
+                key = self.behavior_hotkeys[behavior]
+                key_name = QKeySequence(key).toString()
+                hotkey_item = QTableWidgetItem(key_name)
+            else:
+                hotkey_item = QTableWidgetItem("")
+
+            self.behavior_table.setItem(idx, 1, hotkey_item)
+
+        # Reconnect signal
+        self.behavior_table.itemChanged.connect(self.on_behavior_table_changed)
+
+    def on_behavior_table_changed(self, item: QTableWidgetItem) -> None:
+        """Handle changes to behavior table cells.
+
+        Updates behavior names or hotkeys when user edits table cells.
+        Validates changes and updates all relevant data structures.
+
+        Args:
+            item: The table item that was changed.
+
+        Returns:
+            None
+        """
+        row = item.row()
+        col = item.column()
+
+        if row >= len(self.behavior_types):
             return
 
-        # Save current video segments
-        if self.current_video_name and self.current_video_name in self.videos:
-            self.videos[self.current_video_name][
-                "segments"
-            ] = self.timeline.segments.copy()
+        old_behavior = self.behavior_types[row]
 
-        # Load new video
-        video_name = current.text()
-        if video_name in self.videos:
-            self.current_video_name = video_name
-            video_data = self.videos[video_name]
+        if col == 0:  # Behavior name changed
+            new_name = item.text().strip()
 
-            # Close previous capture
-            if self.cap:
-                self.cap.release()
+            if not new_name:
+                QMessageBox.warning(
+                    self, "Invalid Name", "Behavior name cannot be empty."
+                )
+                self.update_behavior_table()
+                return
 
-            # Open new video
-            self.cap = cv2.VideoCapture(video_data["path"])
-            self.timeline.duration = video_data["duration"]
-            self.timeline.segments = video_data["segments"].copy()
-            self.timeline.selected_segment = None
+            if new_name != old_behavior and new_name in self.behavior_types:
+                QMessageBox.warning(
+                    self, "Duplicate Name", f"Behavior '{new_name}' already exists."
+                )
+                self.update_behavior_table()
+                return
+
+            # Update behavior name everywhere
+            self.behavior_types[row] = new_name
+
+            # Update hotkey mapping
+            if old_behavior in self.behavior_hotkeys:
+                self.behavior_hotkeys[new_name] = self.behavior_hotkeys.pop(
+                    old_behavior
+                )
+
+            # Update color mapping
+            if old_behavior in BehaviorSegment._color_map:
+                BehaviorSegment._color_map[new_name] = BehaviorSegment._color_map.pop(
+                    old_behavior
+                )
+
+            # Update all segments in all videos
+            for video_data in self.videos.values():
+                for seg in video_data["segments"]:
+                    if seg.name == old_behavior:
+                        seg.name = new_name
+
+            # Update current timeline segments
+            for seg in self.timeline.segments:
+                if seg.name == old_behavior:
+                    seg.name = new_name
+
+            self.timeline.update_behavior_types(self.behavior_types)
             self.timeline.update()
-            self.update_frame()
 
-    def remove_video(self) -> None:
-        """Remove the currently selected video and its annotations.
+        elif col == 1:  # Hotkey changed
+            new_hotkey_text = item.text().strip().upper()
 
-        Prompts user for confirmation before deleting. Releases video capture
-        if the removed video is currently active.
+            if not new_hotkey_text:
+                # Remove hotkey
+                if old_behavior in self.behavior_hotkeys:
+                    del self.behavior_hotkeys[old_behavior]
+                return
 
-        Args:
-            None
+            # Validate hotkey (single character or number)
+            if len(new_hotkey_text) != 1:
+                QMessageBox.warning(
+                    self, "Invalid Hotkey", "Hotkey must be a single letter or number."
+                )
+                self.update_behavior_table()
+                return
 
-        Returns:
-            None
-        """
-        current_item = self.video_list.currentItem()
-        if current_item:
-            video_name = current_item.text()
-            reply = QMessageBox.question(
-                self,
-                "Confirm Delete",
-                f"Delete video '{video_name}' and all its annotations?",
-                QMessageBox.Yes | QMessageBox.No,
-            )
-            if reply == QMessageBox.Yes:
-                if video_name in self.videos:
-                    del self.videos[video_name]
-                self.video_list.takeItem(self.video_list.row(current_item))
-                if self.current_video_name == video_name:
-                    self.current_video_name = None
-                    if self.cap:
-                        self.cap.release()
-                        self.cap = None
+            # Get Qt key code
+            key_code = None
+            if new_hotkey_text.isalpha():
+                key_code = getattr(Qt, f"Key_{new_hotkey_text}", None)
+            elif new_hotkey_text.isdigit():
+                key_code = getattr(Qt, f"Key_{new_hotkey_text}", None)
 
-    def on_segment_selected(self, segment: Optional[BehaviorSegment]) -> None:
-        """Handle segment selection event from timeline.
+            if not key_code:
+                QMessageBox.warning(
+                    self,
+                    "Invalid Hotkey",
+                    f"'{new_hotkey_text}' is not a valid hotkey.",
+                )
+                self.update_behavior_table()
+                return
 
-        Callback for when user clicks on a segment in the timeline.
-        Currently a placeholder for future functionality.
+            # Check if hotkey is already in use
+            for behavior, existing_key in self.behavior_hotkeys.items():
+                if behavior != old_behavior and existing_key == key_code:
+                    QMessageBox.warning(
+                        self,
+                        "Hotkey In Use",
+                        f"Hotkey '{new_hotkey_text}' is already assigned to '{behavior}'.",
+                    )
+                    self.update_behavior_table()
+                    return
 
-        Args:
-            segment: The selected segment, or None if selection was cleared.
-
-        Returns:
-            None
-        """
-        pass
-
-    def on_segment_modified(self, segment: BehaviorSegment) -> None:
-        """Update frame numbers when segment is modified by dragging.
-
-        Recalculates start_frame and end_frame based on the updated
-        start_time and end_time after user drags segment edges.
-
-        Args:
-            segment: The segment that was modified.
-
-        Returns:
-            None
-        """
-        if not self.cap or not self.current_video_name:
-            return
-
-        fps = self.videos[self.current_video_name]["fps"]
-
-        # Recalculate frame numbers based on times
-        segment.start_frame = int(segment.start_time * fps)
-        if segment.end_time is not None:
-            segment.end_frame = int(segment.end_time * fps)
-
-        # Save updated segments
-        self.videos[self.current_video_name]["segments"] = self.timeline.segments.copy()
+            # Assign new hotkey
+            self.behavior_hotkeys[old_behavior] = key_code
 
     def update_behavior_list(self) -> None:
         """Update the behavior list widget with current behaviors and hotkeys.
@@ -734,20 +785,18 @@ class AnnotatorGUI(QMainWindow):
         Returns:
             None
         """
-        self.behavior_list.clear()
-        for behavior in self.behavior_types:
-            if behavior in self.behavior_hotkeys:
-                key = self.behavior_hotkeys[behavior]
-                key_name = QKeySequence(key).toString()
-                self.behavior_list.addItem(f"{behavior} ({key_name})")
-            else:
-                self.behavior_list.addItem(behavior)
+        # This method is now replaced by update_behavior_table
+        # Keep for backward compatibility if needed
+        self.update_behavior_table()
 
     def add_new_behavior(self) -> None:
         """Add a new behavior type via user input dialog.
 
-        Prompts user for behavior name, assigns a hotkey based on first letter,
-        and updates all relevant UI components.
+        Prompts user for behavior name, assigns a hotkey based on available letters
+        or numbers, and updates all relevant UI components. Priority order:
+        1. First letter of behavior name
+        2. Other letters in behavior name
+        3. Number keys 1-9, 0
 
         Args:
             None
@@ -759,21 +808,65 @@ class AnnotatorGUI(QMainWindow):
             self, "Add New Behavior", "Enter behavior name:"
         )
         if ok and text:
-            if text not in self.behavior_types:
-                self.behavior_types.append(text)
+            text = text.strip()
+            if not text:
+                return
 
-                # Assign a hotkey
-                if text:
-                    key_name = text[0].upper()
+            if text in self.behavior_types:
+                QMessageBox.warning(
+                    self, "Duplicate", f"Behavior '{text}' already exists."
+                )
+                return
+
+            self.behavior_types.append(text)
+
+            # Assign a hotkey - try letters first, then numbers
+            hotkey_assigned = False
+
+            # Try each letter in the behavior name
+            for char in text:
+                if char.isalpha():
+                    key_name = char.upper()
                     key_code = getattr(Qt, f"Key_{key_name}", None)
                     if key_code and key_code not in self.behavior_hotkeys.values():
                         self.behavior_hotkeys[text] = key_code
+                        hotkey_assigned = True
+                        break
 
-                self.timeline.update_behavior_types(self.behavior_types)
-                self.update_behavior_list()
+            # If no letters available, try number keys 1-9, 0
+            if not hotkey_assigned:
+                for num in [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9",
+                    "0",
+                ]:
+                    key_code = getattr(Qt, f"Key_{num}", None)
+                    if key_code and key_code not in self.behavior_hotkeys.values():
+                        self.behavior_hotkeys[text] = key_code
+                        hotkey_assigned = True
+                        break
 
-                min_height = 20 + len(self.behavior_types) * 45
-                self.timeline.setMinimumHeight(min_height)
+            # If still no hotkey available, notify user
+            if not hotkey_assigned:
+                QMessageBox.information(
+                    self,
+                    "No Hotkey Available",
+                    f"Could not assign a hotkey to '{text}'. All keys are already used.\n"
+                    "You can manually assign a hotkey in the table below.",
+                )
+
+            self.timeline.update_behavior_types(self.behavior_types)
+            self.update_behavior_table()
+
+            min_height = 20 + len(self.behavior_types) * 45
+            self.timeline.setMinimumHeight(min_height)
 
     def delete_behavior(self) -> None:
         """Delete a behavior type from all videos after confirmation.
@@ -827,7 +920,7 @@ class AnnotatorGUI(QMainWindow):
                 ]
 
                 self.timeline.update_behavior_types(self.behavior_types)
-                self.update_behavior_list()
+                self.update_behavior_table()
                 self.timeline.update()
 
                 min_height = 20 + len(self.behavior_types) * 45
@@ -838,7 +931,7 @@ class AnnotatorGUI(QMainWindow):
 
         Intercepts key presses/releases on child widgets to handle:
             - Space: Play/pause
-            - Enter: Start/stop annotation (on behavior list)
+            - Enter: Start/stop annotation (on behavior table)
             - Delete/Backspace: Delete selected segment
             - Behavior hotkeys: Start/stop behavior annotation
 
@@ -852,13 +945,36 @@ class AnnotatorGUI(QMainWindow):
         # Handle keyboard events for all child widgets
         if event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Space:
+                # Don't intercept space in table when editing
+                if (
+                    obj == self.behavior_table
+                    and self.behavior_table.state() == QAbstractItemView.EditingState
+                ):
+                    return False
                 self.toggle_play()
                 return True
             elif event.key() in (Qt.Key_Enter, Qt.Key_Return):
-                if obj == self.behavior_list:
-                    self.handle_annotation()
+                if (
+                    obj == self.behavior_table
+                    and self.behavior_table.state() != QAbstractItemView.EditingState
+                ):
+                    # Get selected row
+                    current_row = self.behavior_table.currentRow()
+                    if current_row >= 0 and current_row < len(self.behavior_types):
+                        behavior = self.behavior_types[current_row]
+                        # Toggle annotation for selected behavior
+                        if self.active_hotkeys.get(behavior, False):
+                            self.stop_behavior_annotation(behavior)
+                        else:
+                            self.start_behavior_annotation(behavior)
                     return True
             elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+                # Don't intercept in table when editing
+                if (
+                    obj == self.behavior_table
+                    and self.behavior_table.state() == QAbstractItemView.EditingState
+                ):
+                    return False
                 if self.timeline.delete_selected_segment():
                     if self.current_video_name:
                         self.videos[self.current_video_name][
@@ -866,12 +982,26 @@ class AnnotatorGUI(QMainWindow):
                         ] = self.timeline.segments.copy()
                 return True
             else:
+                # Don't intercept behavior hotkeys when editing table
+                if (
+                    obj == self.behavior_table
+                    and self.behavior_table.state() == QAbstractItemView.EditingState
+                ):
+                    return False
+
                 # Check for behavior hotkeys
                 for behavior, key in self.behavior_hotkeys.items():
                     if event.key() == key and not event.isAutoRepeat():
                         self.start_behavior_annotation(behavior)
                         return True
         elif event.type() == QEvent.KeyRelease:
+            # Don't intercept when editing table
+            if (
+                obj == self.behavior_table
+                and self.behavior_table.state() == QAbstractItemView.EditingState
+            ):
+                return False
+
             # Handle hotkey release
             for behavior, key in self.behavior_hotkeys.items():
                 if event.key() == key and not event.isAutoRepeat():
@@ -1231,6 +1361,118 @@ class AnnotatorGUI(QMainWindow):
                             ]
                         )
             QMessageBox.information(self, "Success", "Exported successfully!")
+
+    def switch_video(
+        self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]
+    ) -> None:
+        """Switch to a different video from the video list.
+
+        Saves annotations for the previous video and loads the selected video
+        with its associated annotations.
+
+        Args:
+            current: The newly selected list item.
+            previous: The previously selected list item.
+
+        Returns:
+            None
+        """
+        if current is None:
+            return
+
+        # Save current video segments
+        if self.current_video_name and self.current_video_name in self.videos:
+            self.videos[self.current_video_name][
+                "segments"
+            ] = self.timeline.segments.copy()
+
+        # Load new video
+        video_name = current.text()
+        if video_name in self.videos:
+            self.current_video_name = video_name
+            video_data = self.videos[video_name]
+
+            # Close previous capture
+            if self.cap:
+                self.cap.release()
+
+            # Open new video
+            self.cap = cv2.VideoCapture(video_data["path"])
+            self.timeline.duration = video_data["duration"]
+            self.timeline.segments = video_data["segments"].copy()
+            self.timeline.selected_segment = None
+            self.timeline.update()
+            self.update_frame()
+
+    def remove_video(self) -> None:
+        """Remove the currently selected video and its annotations.
+
+        Prompts user for confirmation before deleting. Releases video capture
+        if the removed video is currently active.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        current_item = self.video_list.currentItem()
+        if current_item:
+            video_name = current_item.text()
+            reply = QMessageBox.question(
+                self,
+                "Confirm Delete",
+                f"Delete video '{video_name}' and all its annotations?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                if video_name in self.videos:
+                    del self.videos[video_name]
+                self.video_list.takeItem(self.video_list.row(current_item))
+                if self.current_video_name == video_name:
+                    self.current_video_name = None
+                    if self.cap:
+                        self.cap.release()
+                        self.cap = None
+
+    def on_segment_selected(self, segment: Optional[BehaviorSegment]) -> None:
+        """Handle segment selection event from timeline.
+
+        Callback for when user clicks on a segment in the timeline.
+        Currently a placeholder for future functionality.
+
+        Args:
+            segment: The selected segment, or None if selection was cleared.
+
+        Returns:
+            None
+        """
+        pass
+
+    def on_segment_modified(self, segment: BehaviorSegment) -> None:
+        """Update frame numbers when segment is modified by dragging.
+
+        Recalculates start_frame and end_frame based on the updated
+        start_time and end_time after user drags segment edges.
+
+        Args:
+            segment: The segment that was modified.
+
+        Returns:
+            None
+        """
+        if not self.cap or not self.current_video_name:
+            return
+
+        fps = self.videos[self.current_video_name]["fps"]
+
+        # Recalculate frame numbers based on times
+        segment.start_frame = int(segment.start_time * fps)
+        if segment.end_time is not None:
+            segment.end_frame = int(segment.end_time * fps)
+
+        # Save updated segments
+        self.videos[self.current_video_name]["segments"] = self.timeline.segments.copy()
 
 
 if __name__ == "__main__":
