@@ -270,7 +270,7 @@ class TimelineWidget(QWidget):
 class AnnotatorGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Behavior Annotator (ChronoViz Style)")
+        self.setWindowTitle("Python Behavior Annotator")
         self.setGeometry(100, 100, 1200, 700)
 
         # Video management
