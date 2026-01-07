@@ -1,7 +1,8 @@
+```markdown
 # annotation-gui
 # Python Behavior Annotator
 
-A PyQt5-based GUI application for annotating animal behavior in videos, inspired by ChronoViz. Supports multiple videos, customizable behaviors, timeline-based annotation with drag-and-drop editing, and CSV export.
+A PyQt5-based GUI application for annotating animal behavior in videos, inspired by ChronoViz. Supports multiple videos, customizable behaviors with **editable names and hotkeys**, timeline-based annotation with drag-and-drop editing, and CSV export.
 
 ![pythonbehavior](https://github.com/user-attachments/assets/2cc5a964-d362-4bb4-8034-d7287bd58668)
 
@@ -10,6 +11,7 @@ A PyQt5-based GUI application for annotating animal behavior in videos, inspired
 
 - **Multi-video support**: Load and annotate multiple videos in one session
 - **Flexible behavior tracking**: Add custom behaviors with automatic hotkey assignment
+- **Editable behavior table**: Rename behaviors and reassign hotkeys on-the-fly
 - **Timeline visualization**: Color-coded behavior segments on an interactive timeline
 - **Drag-and-drop editing**: Click and drag segment edges to adjust timing
 - **Keyboard shortcuts**: Fast annotation with customizable hotkeys
@@ -116,22 +118,58 @@ chmod +x run_annotator.sh
 - Click on a video name to switch between videos
 - Click **Remove Video** to delete a video and its annotations
 
-### 2. Adding New Behaviors
+### 2. Managing Behaviors
 
 **Default Behaviors:**
 - Immobility (Hotkey: **I**)
 - Rear (Hotkey: **R**)
 - Groom (Hotkey: **G**)
 
-**To Add a Custom Behavior:**
+#### Adding New Behaviors
+
 1. Click **Behaviors** → **Add New Behavior**
 2. Enter the behavior name (e.g., "Walk", "Sniff", "Investigate")
 3. Hotkey is automatically assigned:
    - First available letter from the behavior name
    - If first letter is taken, tries subsequent letters
+   - Falls back to number keys (1-9, 0) if all letters are used
    - Example: "Walk" → **W**, "Water" → **A** (if W is taken)
 
-**To Delete a Behavior:**
+#### Editing Behavior Names
+
+**The behavior table is fully editable!** To rename a behavior:
+
+1. **Double-click** on the behavior name in the table
+2. Type the new name
+3. Press **Enter** or click outside the cell
+4. All existing annotations automatically update to the new name
+
+**Validation:**
+- Empty names are rejected
+- Duplicate names are prevented
+- All segments across all videos are updated instantly
+
+#### Editing Hotkeys
+
+**Change hotkeys anytime!** To reassign a hotkey:
+
+1. **Double-click** on the hotkey cell in the table
+2. Type a single letter (A-Z) or number (0-9)
+   - Lowercase letters are automatically converted to uppercase
+   - Example: typing "m" becomes "M"
+3. Press **Enter** or click outside the cell
+
+**Validation:**
+- Must be a single character (letters or numbers only)
+- Duplicate hotkeys are prevented
+- Symbols and special characters are rejected
+
+**Removing Hotkeys:**
+- Clear the hotkey cell (make it empty) to remove a hotkey
+- The behavior remains but won't have keyboard shortcut
+
+#### Deleting Behaviors
+
 1. Click **Behaviors** → **Delete Behavior**
 2. Select the behavior from the dropdown
 3. Confirm deletion (removes from ALL videos)
@@ -148,10 +186,11 @@ chmod +x run_annotator.sh
 - Fast and intuitive
 - Can annotate multiple behaviors simultaneously
 - Works while video is playing or paused
+- Hotkeys update immediately if you change them in the table
 
 #### Method 2: Enter Key (Two-Press Method)
 
-1. Select a behavior from the behavior list (right panel)
+1. Select a behavior row in the behavior table
 2. Press **Enter** to mark start time
 3. Press **Enter** again to mark end time
 
@@ -184,14 +223,36 @@ chmod +x run_annotator.sh
 1. Click on a segment to select it
 2. Press **Delete** or **Backspace**
 
-### 6. Timeline Features
+### 6. Behavior Table Features
+
+The behavior table shows all behaviors and their hotkeys:
+
+| Behavior Name | Hotkey |
+|---------------|--------|
+| Immobility    | I      |
+| Rear          | R      |
+| Groom         | G      |
+
+**Interactive Features:**
+- **Double-click any cell** to edit
+- **Tab key** to move between cells
+- **Enter key** to confirm edits
+- **Esc key** to cancel editing (standard Qt behavior)
+
+**Real-time Updates:**
+- Timeline rows update when you rename behaviors
+- Existing annotations adopt the new name instantly
+- Color mappings persist across name changes
+- Active annotations (in-progress) are preserved
+
+### 7. Timeline Features
 
 - **Color-coded rows**: Each behavior has its own row with a unique color
-- **Behavior labels**: Left side shows behavior names
+- **Behavior labels**: Left side shows behavior names (updated in real-time)
 - **Red playhead**: Vertical line shows current video position
 - **Transparent segments**: Ongoing annotations (no end time yet) extend to playhead
 
-### 7. Exporting to CSV
+### 8. Exporting to CSV
 
 1. Click **File** → **Export All to CSV**
 2. Choose save location and filename
@@ -206,9 +267,11 @@ test_video.mp4,Rear,5.0,7.8,150,234
 video2.mp4,Groom,2.1,4.5,63,135
 ```
 
+**Important:** CSV export uses the **current** behavior names at export time. If you renamed behaviors, the export will show the new names.
+
 **Column Descriptions:**
 - `Video`: Filename of the video
-- `Behavior`: Name of the behavior
+- `Behavior`: Name of the behavior (current name, not original)
 - `Start_Time`: Start time in seconds (float)
 - `End_Time`: End time in seconds (empty if incomplete)
 - `Start_Frame`: Frame number at start
@@ -224,13 +287,16 @@ video2.mp4,Groom,2.1,4.5,63,135
 | Shortcut | Action |
 |----------|--------|
 | **Space** | Play/Pause video |
-| **I** | Annotate Immobility (default) |
-| **R** | Annotate Rear (default) |
-| **G** | Annotate Groom (default) |
+| **I** | Annotate Immobility (default, editable) |
+| **R** | Annotate Rear (default, editable) |
+| **G** | Annotate Groom (default, editable) |
 | **Custom** | Your custom behavior hotkeys |
-| **Enter** | Start/Stop annotation (two-press method) |
+| **0-9, A-Z** | Any letter/number you assign |
+| **Enter** | Start/Stop annotation (on selected behavior) |
 | **Delete** | Delete selected segment |
 | **Backspace** | Delete selected segment (alternative) |
+
+**Note:** Hotkeys can be changed anytime by editing the behavior table!
 
 ## Workflow Example
 
@@ -242,22 +308,26 @@ video2.mp4,Groom,2.1,4.5,63,135
 
 2. **Load video** using File → Add Video
 
-3. **Add behaviors** (if needed):
-   - Behaviors → Add New Behavior → "Walk"
-   - Behaviors → Add New Behavior → "Sniff"
+3. **Customize behaviors:**
+   - Double-click "Immobility" → Change to "Freezing"
+   - Double-click "I" → Change to "F"
+   - Add new behavior: Behaviors → Add New Behavior → "Walk"
+   - Adjust hotkey: Double-click "W" → Change to "K" if preferred
 
 4. **Annotate:**
    - Press **Space** to start video
-   - Hold **I** during immobility periods
-   - Hold **W** during walking periods
+   - Hold **F** during freezing periods (your new hotkey)
+   - Hold **K** during walking periods
    - Press **Space** to pause if needed
 
 5. **Edit:**
+   - Rename "Walk" to "Locomotion" mid-session (all segments update!)
    - Click and drag segment edges to fine-tune timing
    - Delete mistakes with **Delete** key
 
 6. **Export:**
    - File → Export All to CSV
+   - CSV contains your finalized behavior names
    - Open CSV in Excel, Python, R, etc.
 
 ## Tips and Best Practices
@@ -265,18 +335,27 @@ video2.mp4,Groom,2.1,4.5,63,135
 ### Annotation Tips
 - **Pause frequently** to ensure accurate timing
 - **Use hotkeys** for faster annotation (faster than Enter method)
+- **Rename behaviors anytime** - don't worry about getting names perfect initially
 - **Annotate in passes**: Watch once for each behavior type
 - **Review on timeline** before exporting
+
+### Behavior Management Tips
+- **Descriptive names**: Use clear names like "GroomingFace" vs "Groom1"
+- **Consistent hotkeys**: Keep related behaviors near each other on keyboard (e.g., F-G-H)
+- **Remove unused hotkeys**: If you rarely use a behavior's hotkey, clear it to avoid accidents
+- **Test new hotkeys**: Press the hotkey after reassigning to ensure it works
 
 ### Performance Tips
 - Videos stay in memory; close unused videos if RAM is limited
 - Large videos (>1GB) may load slowly—be patient
 - Timeline updates are fast, but rendering 100+ segments may cause lag
+- Editing behavior names is instant (no performance impact)
 
 ### Data Management
 - **Export regularly** to avoid losing work
 - **Use descriptive filenames**: `rat_01_session_2_annotations.csv`
 - **Backup your data**: Keep copies of videos and CSVs
+- **Document name changes**: Keep notes if you significantly rename behaviors
 
 ## Troubleshooting
 
@@ -284,24 +363,42 @@ video2.mp4,Groom,2.1,4.5,63,135
 - Ensure video codec is supported by OpenCV
 - Try converting to MP4 with H.264: `ffmpeg -i input.avi -c:v libx264 output.mp4`
 
-### Hotkey not working
-- Check if letter is already assigned to another behavior
-- Use Behaviors → Add New Behavior to see assigned hotkeys
-- Some letters may be reserved by the OS (e.g., Cmd+Q on Mac)
+### Hotkey not working after reassignment
+- Make sure you pressed Enter after editing the cell
+- Check that no warning dialog appeared (duplicate hotkey)
+- Letters must be single characters (A-Z, 0-9 only)
+- Restart the annotation (press hotkey again) if changed during active annotation
 
-### Timeline lag with many segments
-- Export and start a new session
-- Reduce video resolution (timeline doesn't need high-res)
+### Can't rename behavior
+- Check for error dialog - name might be empty or duplicate
+- Make sure you're double-clicking the cell to edit
+- Press Enter or Tab to confirm the change
 
-### CSV has empty End_Time/End_Frame
-- You have incomplete annotations (started but not finished)
-- Press the hotkey again to finish, or delete the segment
+### Timeline shows old behavior name
+- This shouldn't happen - contact support if it does (it's a bug!)
+- All timeline rows update automatically when you rename
 
-### Application crashes on startup
+### CSV has old behavior names
+- **This is expected!** You may have renamed behaviors after annotating
+- Re-export the CSV to get current names
+- The app doesn't track historical names
+
+### Application crashes when editing
 - Verify conda environment: `conda list`
 - Reinstall: `conda env remove -n behavior_gui && conda env create -f environment.yaml`
 
 ## Advanced Usage
+
+### Workflow: Iterative Refinement
+
+```plaintext
+1. Start with generic names: "Behavior1", "Behavior2"
+2. Annotate first pass
+3. Review timeline
+4. Rename behaviors descriptively: "Behavior1" → "SniffingCorner"
+5. Continue annotating with refined understanding
+6. Export with final, descriptive names
+```
 
 ### Batch Processing Multiple Sessions
 
@@ -326,6 +423,25 @@ df['Duration'] = df['End_Time'] - df['Start_Time']
 # Total time per behavior
 summary = df.groupby('Behavior')['Duration'].sum()
 print(summary)
+```
+
+### Analyzing Name Changes
+
+If you want to track which behaviors were renamed:
+
+```python
+# Keep a log of name changes in a separate file
+changes = {
+    'Behavior1': 'SniffingCorner',
+    'Behavior2': 'Rearing', 
+    'WalkFast': 'Locomotion'
+}
+
+# Apply retroactively to old CSVs if needed
+import pandas as pd
+df = pd.read_csv('old_annotations.csv')
+df['Behavior'] = df['Behavior'].replace(changes)
+df.to_csv('updated_annotations.csv', index=False)
 ```
 
 ## System Requirements
