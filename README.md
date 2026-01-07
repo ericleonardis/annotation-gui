@@ -95,19 +95,6 @@ chmod +x run_annotator.sh
 ./run_annotator.sh
 ```
 
-**For Windows:**
-
-Create a file called `run_annotator.bat`:
-
-```batch
-@echo off
-call conda activate behavior_gui
-python annotation_GUI.py
-pause
-```
-
-Double-click the file to launch.
-
 ## Usage Guide
 
 ### 1. Loading Videos
