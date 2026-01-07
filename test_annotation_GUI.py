@@ -14,7 +14,17 @@ from annotation_GUI import AnnotatorGUI, BehaviorSegment, TimelineWidget
 
 @pytest.fixture(scope="session")
 def qapp():
-    """Create QApplication instance for all tests."""
+    """Create QApplication instance for all tests.
+
+    Creates a singleton QApplication instance that persists for the entire
+    test session. Required for testing PyQt5 GUI components.
+
+    Args:
+        None
+
+    Returns:
+        QApplication: The application instance used for all GUI tests.
+    """
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
@@ -23,7 +33,17 @@ def qapp():
 
 @pytest.fixture
 def temp_video(tmp_path):
-    """Create a temporary test video file."""
+    """Create a temporary test video file.
+
+    Generates a 10-second MP4 video at 30 FPS with 640x480 resolution.
+    Each frame has a different color pattern for visual distinction.
+
+    Args:
+        tmp_path: pytest fixture providing temporary directory path.
+
+    Returns:
+        str: Absolute path to the created test video file.
+    """
     video_path = tmp_path / "test_video.mp4"
 
     # Create a simple test video
@@ -47,13 +67,31 @@ def temp_video(tmp_path):
 
 @pytest.fixture
 def temp_csv(tmp_path):
-    """Create a temporary CSV file path."""
+    """Create a temporary CSV file path.
+
+    Args:
+        tmp_path: pytest fixture providing temporary directory path.
+
+    Returns:
+        str: Absolute path where CSV file can be written.
+    """
     return str(tmp_path / "test_export.csv")
 
 
 @pytest.fixture
 def gui(qapp, temp_video):
-    """Create GUI instance with a loaded video."""
+    """Create GUI instance with a loaded video.
+
+    Initializes AnnotatorGUI, shows the window, and loads a test video
+    using mocked file dialogs. Handles cleanup after test completion.
+
+    Args:
+        qapp: pytest fixture providing QApplication instance.
+        temp_video: pytest fixture providing path to test video.
+
+    Returns:
+        AnnotatorGUI: Initialized GUI instance with loaded test video.
+    """
     window = AnnotatorGUI()
     window.show()
 
@@ -76,7 +114,17 @@ class TestBehaviorSegment:
     """Test BehaviorSegment class."""
 
     def test_segment_creation(self):
-        """Test creating a behavior segment."""
+        """Test creating a behavior segment.
+
+        Verifies that BehaviorSegment initializes correctly with all
+        attributes set to expected values.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
         assert seg.name == "Immobility"
         assert seg.start_time == 1.0
@@ -86,19 +134,48 @@ class TestBehaviorSegment:
         assert seg.color is not None
 
     def test_color_assignment(self):
-        """Test that segments get unique colors."""
+        """Test that segments get unique colors.
+
+        Verifies that different behavior types receive distinct colors
+        from the color palette.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         seg1 = BehaviorSegment("NewBehavior1", 0, 1)
         seg2 = BehaviorSegment("NewBehavior2", 1, 2)
         assert seg1.color != seg2.color
 
     def test_color_persistence(self):
-        """Test that same behavior gets same color."""
+        """Test that same behavior gets same color.
+
+        Verifies that multiple segments of the same behavior type
+        share the same color.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         seg1 = BehaviorSegment("TestBehavior", 0, 1)
         seg2 = BehaviorSegment("TestBehavior", 2, 3)
         assert seg1.color == seg2.color
 
     def test_remove_behavior_color(self):
-        """Test removing behavior color mapping."""
+        """Test removing behavior color mapping.
+
+        Verifies that color mapping can be removed and freed up for reuse.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         test_behavior = "RemoveMe"
         seg = BehaviorSegment(test_behavior, 0, 1)
         original_color = seg.color
@@ -111,7 +188,16 @@ class TestTimelineWidget:
     """Test TimelineWidget class."""
 
     def test_timeline_initialization(self, qapp):
-        """Test timeline widget initialization."""
+        """Test timeline widget initialization.
+
+        Verifies that TimelineWidget initializes with correct default values.
+
+        Args:
+            qapp: pytest fixture providing QApplication instance.
+
+        Returns:
+            None
+        """
         timeline = TimelineWidget()
         assert timeline.duration == 1.0
         assert timeline.current_time == 0.0
@@ -119,14 +205,32 @@ class TestTimelineWidget:
         assert len(timeline.behavior_types) == 3
 
     def test_update_behavior_types(self, qapp):
-        """Test updating behavior types."""
+        """Test updating behavior types.
+
+        Verifies that behavior type list can be updated dynamically.
+
+        Args:
+            qapp: pytest fixture providing QApplication instance.
+
+        Returns:
+            None
+        """
         timeline = TimelineWidget()
         new_behaviors = ["Walk", "Run", "Jump"]
         timeline.update_behavior_types(new_behaviors)
         assert timeline.behavior_types == new_behaviors
 
     def test_get_behavior_row(self, qapp):
-        """Test getting behavior row position."""
+        """Test getting behavior row position.
+
+        Verifies that Y-coordinates for behavior rows are calculated correctly.
+
+        Args:
+            qapp: pytest fixture providing QApplication instance.
+
+        Returns:
+            None
+        """
         timeline = TimelineWidget()
         row = timeline.get_behavior_row("Immobility")
         assert row == 10  # First behavior at y=10
@@ -135,7 +239,16 @@ class TestTimelineWidget:
         assert row == 10 + 45  # Second behavior
 
     def test_segment_selection(self, qapp):
-        """Test segment selection."""
+        """Test segment selection.
+
+        Verifies that segments can be selected on the timeline.
+
+        Args:
+            qapp: pytest fixture providing QApplication instance.
+
+        Returns:
+            None
+        """
         timeline = TimelineWidget()
         timeline.duration = 10.0
 
@@ -146,7 +259,16 @@ class TestTimelineWidget:
         assert timeline.selected_segment == seg
 
     def test_delete_selected_segment(self, qapp):
-        """Test deleting selected segment."""
+        """Test deleting selected segment.
+
+        Verifies that selected segments can be deleted from timeline.
+
+        Args:
+            qapp: pytest fixture providing QApplication instance.
+
+        Returns:
+            None
+        """
         timeline = TimelineWidget()
         seg = BehaviorSegment("Immobility", 1.0, 2.0)
         timeline.segments.append(seg)
@@ -162,7 +284,16 @@ class TestAnnotatorGUI:
     """Test AnnotatorGUI main window."""
 
     def test_gui_initialization(self, qapp):
-        """Test GUI initialization."""
+        """Test GUI initialization.
+
+        Verifies that AnnotatorGUI initializes with correct default state.
+
+        Args:
+            qapp: pytest fixture providing QApplication instance.
+
+        Returns:
+            None
+        """
         window = AnnotatorGUI()
         assert window.windowTitle() == "Python Behavior Annotator (ChronoViz Style)"
         assert len(window.videos) == 0
@@ -170,7 +301,16 @@ class TestAnnotatorGUI:
         assert len(window.behavior_types) == 3
 
     def test_load_single_video(self, gui):
-        """Test loading a single video."""
+        """Test loading a single video.
+
+        Verifies that video loads correctly with proper FPS and duration.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         assert len(gui.videos) == 1
         assert gui.current_video_name is not None
         assert gui.cap is not None
@@ -180,7 +320,18 @@ class TestAnnotatorGUI:
         assert video_data["duration"] == pytest.approx(10.0, rel=0.1)
 
     def test_load_multiple_videos(self, qapp, temp_video, tmp_path):
-        """Test loading multiple videos."""
+        """Test loading multiple videos.
+
+        Verifies that multiple videos can be loaded simultaneously.
+
+        Args:
+            qapp: pytest fixture providing QApplication instance.
+            temp_video: pytest fixture providing path to first test video.
+            tmp_path: pytest fixture providing temporary directory path.
+
+        Returns:
+            None
+        """
         # Create second video
         video2_path = tmp_path / "test_video2.mp4"
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -206,7 +357,18 @@ class TestAnnotatorGUI:
         window.close()
 
     def test_switch_video(self, gui, tmp_path):
-        """Test switching between videos."""
+        """Test switching between videos.
+
+        Verifies that annotations are saved when switching videos and
+        that each video maintains its own annotation state.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            tmp_path: pytest fixture providing temporary directory path.
+
+        Returns:
+            None
+        """
         # Add annotation to first video
         seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
@@ -239,7 +401,17 @@ class TestAnnotatorGUI:
         assert len(gui.timeline.segments) == 0
 
     def test_remove_video(self, gui):
-        """Test removing a video."""
+        """Test removing a video.
+
+        Verifies that videos can be removed from the application with
+        proper cleanup.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         video_name = gui.current_video_name
 
         with patch("annotation_GUI.QMessageBox.question", return_value=QMessageBox.Yes):
@@ -249,7 +421,17 @@ class TestAnnotatorGUI:
         assert gui.video_list.count() == 0
 
     def test_add_behavior(self, gui):
-        """Test adding a new behavior."""
+        """Test adding a new behavior.
+
+        Verifies that new behavior types can be added with automatic
+        hotkey assignment.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         initial_count = len(gui.behavior_types)
 
         with patch("annotation_GUI.QInputDialog.getText", return_value=("Walk", True)):
@@ -260,7 +442,17 @@ class TestAnnotatorGUI:
         assert "Walk" in gui.behavior_hotkeys
 
     def test_delete_behavior(self, gui):
-        """Test deleting a behavior."""
+        """Test deleting a behavior.
+
+        Verifies that behavior types can be deleted and all associated
+        segments are removed from all videos.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         # Add a segment
         seg = BehaviorSegment("Immobility", 1.0, 2.0)
         gui.timeline.segments.append(seg)
@@ -278,7 +470,17 @@ class TestAnnotatorGUI:
         assert len(gui.timeline.segments) == 0
 
     def test_annotation_with_hotkeys(self, gui):
-        """Test creating annotation with hotkeys."""
+        """Test creating annotation with hotkeys.
+
+        Verifies that pressing and releasing behavior hotkeys creates
+        annotations with correct start and end times.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         # Simulate pressing 'I' key (Immobility)
         QTest.keyPress(gui, Qt.Key_I)
         QTest.qWait(100)
@@ -294,7 +496,16 @@ class TestAnnotatorGUI:
         assert gui.timeline.segments[0].end_time is not None
 
     def test_annotation_with_enter_key(self, gui):
-        """Test creating annotation with Enter key."""
+        """Test creating annotation with Enter key.
+
+        Verifies that two-press Enter annotation method works correctly.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         gui.behavior_list.setCurrentRow(0)
 
         # First press - start annotation
@@ -311,7 +522,16 @@ class TestAnnotatorGUI:
         assert gui.timeline.segments[0].end_time is not None
 
     def test_delete_segment_with_keyboard(self, gui):
-        """Test deleting segment with Delete key."""
+        """Test deleting segment with Delete key.
+
+        Verifies that selected segments can be deleted via keyboard.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         seg = BehaviorSegment("Immobility", 1.0, 2.0)
         gui.timeline.segments.append(seg)
         gui.timeline.selected_segment = seg
@@ -322,7 +542,16 @@ class TestAnnotatorGUI:
         assert len(gui.timeline.segments) == 0
 
     def test_play_pause_toggle(self, gui):
-        """Test play/pause functionality."""
+        """Test play/pause functionality.
+
+        Verifies that Space key toggles video playback state.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         assert gui.is_playing is False
 
         QTest.keyPress(gui, Qt.Key_Space)
@@ -340,7 +569,17 @@ class TestSegmentModification:
     """Test segment modification and frame recalculation."""
 
     def test_segment_drag_updates_frames(self, gui):
-        """Test that dragging segment edges updates frame numbers."""
+        """Test that dragging segment edges updates frame numbers.
+
+        Verifies that modifying segment end time recalculates end frame
+        number based on video FPS.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         # Create a segment
         seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
@@ -355,7 +594,17 @@ class TestSegmentModification:
         assert seg.start_frame == 30
 
     def test_segment_start_drag_updates_frames(self, gui):
-        """Test dragging start edge updates start frame."""
+        """Test dragging start edge updates start frame.
+
+        Verifies that modifying segment start time recalculates start frame
+        number based on video FPS.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
         gui.timeline.duration = 10.0
@@ -373,7 +622,18 @@ class TestCSVExport:
     """Test CSV export functionality."""
 
     def test_export_empty(self, gui, temp_csv):
-        """Test exporting with no annotations."""
+        """Test exporting with no annotations.
+
+        Verifies that CSV export creates valid file with header when
+        no annotations exist.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         with patch(
             "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
         ):
@@ -396,7 +656,17 @@ class TestCSVExport:
             ]
 
     def test_export_single_annotation(self, gui, temp_csv):
-        """Test exporting single annotation."""
+        """Test exporting single annotation.
+
+        Verifies that single annotation exports correctly with all fields.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         # Add annotation
         seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
@@ -419,7 +689,17 @@ class TestCSVExport:
             assert int(rows[1][5]) == 60
 
     def test_export_multiple_annotations(self, gui, temp_csv):
-        """Test exporting multiple annotations."""
+        """Test exporting multiple annotations.
+
+        Verifies that multiple annotations from same video export correctly.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
         seg2 = BehaviorSegment("Rear", 3.0, 4.0, 90, 120)
         seg3 = BehaviorSegment("Groom", 5.0, 6.0, 150, 180)
@@ -439,7 +719,19 @@ class TestCSVExport:
             assert len(rows) == 4  # Header + 3 data rows
 
     def test_export_multiple_videos(self, gui, temp_csv, tmp_path):
-        """Test exporting annotations from multiple videos."""
+        """Test exporting annotations from multiple videos.
+
+        Verifies that annotations from multiple videos export together
+        with video names correctly associated.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+            tmp_path: pytest fixture providing temporary directory path.
+
+        Returns:
+            None
+        """
         # Add annotation to first video
         seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg1)
@@ -482,7 +774,18 @@ class TestCSVExport:
             assert len(set(video_names)) == 2  # Two different videos
 
     def test_export_modified_segment_frames(self, gui, temp_csv):
-        """Test that modified segment frame numbers are exported correctly."""
+        """Test that modified segment frame numbers are exported correctly.
+
+        Verifies that frame recalculation after segment modification
+        persists to CSV export.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         # Create segment
         seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
@@ -505,7 +808,18 @@ class TestCSVExport:
             assert int(rows[1][5]) == 90
 
     def test_export_incomplete_segment(self, gui, temp_csv):
-        """Test exporting segment without end time."""
+        """Test exporting segment without end time.
+
+        Verifies that incomplete annotations (ongoing at export time)
+        export with empty end fields.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         seg = BehaviorSegment("Immobility", 1.0, None, 30, None)
         gui.timeline.segments.append(seg)
         gui.videos[gui.current_video_name]["segments"] = [seg]
@@ -523,7 +837,17 @@ class TestCSVExport:
             assert rows[1][5] == ""  # Empty end frame
 
     def test_export_after_deleting_segment(self, gui, temp_csv):
-        """Test CSV export after deleting a segment."""
+        """Test CSV export after deleting a segment.
+
+        Verifies that deleted segments don't appear in CSV export.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         # Add three segments
         seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
         seg2 = BehaviorSegment("Rear", 3.0, 4.0, 90, 120)
@@ -556,7 +880,19 @@ class TestCSVExport:
             assert "Rear" not in behaviors
 
     def test_export_with_long_video_duration(self, qapp, tmp_path, temp_csv):
-        """Test CSV with very long video durations."""
+        """Test CSV with very long video durations.
+
+        Verifies that hour-long videos with large frame/time numbers
+        export correctly without overflow or precision issues.
+
+        Args:
+            qapp: pytest fixture providing QApplication instance.
+            tmp_path: pytest fixture providing temporary directory path.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         # Create a long video (simulating 1 hour)
         long_video_path = tmp_path / "long_video.mp4"
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -622,7 +958,18 @@ class TestCSVExport:
         window.close()
 
     def test_export_with_special_characters_in_behavior_names(self, gui, temp_csv):
-        """Test CSV with special characters in behavior names."""
+        """Test CSV with special characters in behavior names.
+
+        Verifies that CSV properly escapes special characters like
+        quotes, commas, ampersands, etc.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         # Create behaviors with various special characters
         special_behaviors = [
             "Walk & Run",
@@ -670,7 +1017,18 @@ class TestCSVExport:
                 assert behavior in exported_behaviors
 
     def test_export_with_read_only_file(self, gui, tmp_path):
-        """Test CSV export with file permission errors."""
+        """Test CSV export with file permission errors.
+
+        Verifies that export handles read-only file errors gracefully
+        without crashing the application.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            tmp_path: pytest fixture providing temporary directory path.
+
+        Returns:
+            None
+        """
         read_only_csv = tmp_path / "readonly.csv"
 
         # Create a read-only file
@@ -700,7 +1058,17 @@ class TestCSVExport:
             read_only_csv.chmod(0o644)
 
     def test_export_to_nonexistent_directory(self, gui):
-        """Test CSV export to a directory that doesn't exist."""
+        """Test CSV export to a directory that doesn't exist.
+
+        Verifies that export handles nonexistent paths gracefully
+        without crashing the application.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         nonexistent_path = "/nonexistent/directory/test.csv"
 
         # Add a segment
@@ -720,7 +1088,18 @@ class TestCSVExport:
                 pass
 
     def test_export_with_unicode_behavior_names(self, gui, temp_csv):
-        """Test CSV with Unicode characters in behavior names."""
+        """Test CSV with Unicode characters in behavior names.
+
+        Verifies that emoji, international characters, and Unicode symbols
+        export correctly with UTF-8 encoding.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         unicode_behaviors = [
             "Grooming 🧹",
             "Walking →",
@@ -749,7 +1128,8 @@ class TestCSVExport:
 
         # Export
         with patch(
-            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+            "annotation_GUI.QFileDialog.getSaveFileName",
+            return_value=(temp_csv, ""),
         ):
             with patch("annotation_GUI.QMessageBox.information"):
                 gui.export_csv()
@@ -764,7 +1144,18 @@ class TestCSVExport:
                 assert behavior in exported_behaviors
 
     def test_export_preserves_segment_order(self, gui, temp_csv):
-        """Test that CSV export preserves the order of segments."""
+        """Test that CSV export preserves the order of segments.
+
+        Verifies that segments are exported in the order they were added,
+        not sorted by time or behavior name.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         # Add segments in non-chronological order
         seg3 = BehaviorSegment("Groom", 5.0, 6.0, 150, 180)
         seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
@@ -792,7 +1183,18 @@ class TestCSVExport:
             assert rows[3][1] == "Rear"
 
     def test_export_with_zero_duration_segment(self, gui, temp_csv):
-        """Test exporting segment with zero or very small duration."""
+        """Test exporting segment with zero or very small duration.
+
+        Verifies that segments with minimal duration (e.g., 1ms) export
+        correctly without errors or precision loss.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+            temp_csv: pytest fixture providing temporary CSV file path.
+
+        Returns:
+            None
+        """
         # Create a segment with very small duration
         seg = BehaviorSegment("Immobility", 1.0, 1.001, 30, 30)
         gui.timeline.segments.append(seg)
@@ -818,7 +1220,16 @@ class TestVideoSeek:
     """Test video seeking functionality."""
 
     def test_seek_to_time(self, gui):
-        """Test seeking to specific time."""
+        """Test seeking to specific time.
+
+        Verifies that programmatic seeking moves video to correct position.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         initial_time = gui.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
 
         gui.seek_video(5.0)  # Seek to 5 seconds
@@ -828,7 +1239,17 @@ class TestVideoSeek:
         assert current_time == pytest.approx(5.0, abs=0.1)
 
     def test_timeline_click_seeks(self, gui):
-        """Test clicking timeline seeks video."""
+        """Test clicking timeline seeks video.
+
+        Verifies that clicking on timeline scrubs video to corresponding
+        time position.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         # Simulate clicking at 50% of timeline
         timeline_width = gui.timeline.width()
         click_x = timeline_width // 2
@@ -846,7 +1267,16 @@ class TestUIElements:
     """Test UI elements and interactions."""
 
     def test_behavior_list_updated_on_add(self, gui):
-        """Test behavior list updates when adding behavior."""
+        """Test behavior list updates when adding behavior.
+
+        Verifies that UI list widget displays newly added behaviors.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         initial_count = gui.behavior_list.count()
 
         with patch("annotation_GUI.QInputDialog.getText", return_value=("Walk", True)):
@@ -855,14 +1285,33 @@ class TestUIElements:
         assert gui.behavior_list.count() == initial_count + 1
 
     def test_video_list_updated_on_load(self, gui):
-        """Test video list shows loaded videos."""
+        """Test video list shows loaded videos.
+
+        Verifies that video list widget displays loaded video filenames.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         assert gui.video_list.count() == 1
         assert gui.video_list.item(0).text() == os.path.basename(
             gui.videos[gui.current_video_name]["path"]
         )
 
     def test_play_button_exists(self, gui):
-        """Test play button exists and is clickable."""
+        """Test play button exists and is clickable.
+
+        Verifies that play/pause button is present and functional,
+        toggling playback state when clicked.
+
+        Args:
+            gui: pytest fixture providing initialized GUI with loaded video.
+
+        Returns:
+            None
+        """
         assert gui.btn_play is not None
         assert gui.btn_play.text() == "Play/Pause (Space)"
 
