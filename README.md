@@ -356,23 +356,6 @@ Contributions are welcome! Please:
 4. Push to branch (`git push origin feature/new-behavior`)
 5. Open a Pull Request
 
-## License
-
-MIT License - see LICENSE file for details
-
-## Citation
-
-If you use this tool in your research, please cite:
-
-```bibtex
-@software{behavior_annotator_2025,
-  author = {Your Name},
-  title = {Python Behavior Annotator},
-  year = {2025},
-  url = {https://github.com/yourusername/AnnotationGUI}
-}
-```
-
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/yourusername/AnnotationGUI/issues)
