@@ -1,4 +1,3 @@
-```markdown
 # annotation-gui
 # Python Behavior Annotator
 
