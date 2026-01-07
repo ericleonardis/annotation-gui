@@ -102,6 +102,7 @@ class TimelineWidget(QWidget):
     clicked_pos = pyqtSignal(float)
     dragging = pyqtSignal(float)
     segment_selected = pyqtSignal(object)
+    segment_modified = pyqtSignal(object)  # New signal
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -250,6 +251,10 @@ class TimelineWidget(QWidget):
                 self.setCursor(Qt.ArrowCursor)
 
     def mouseReleaseEvent(self, event):
+        # Emit signal if segment was being dragged
+        if self.is_dragging and self.drag_segment:
+            self.segment_modified.emit(self.drag_segment)
+
         self.is_dragging = False
         self.is_scrubbing = False
         self.drag_segment = None
@@ -270,7 +275,7 @@ class TimelineWidget(QWidget):
 class AnnotatorGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Behavior Annotator")
+        self.setWindowTitle("Python Behavior Annotator (ChronoViz Style)")
         self.setGeometry(100, 100, 1200, 700)
 
         # Video management
@@ -363,6 +368,9 @@ class AnnotatorGUI(QMainWindow):
         self.timeline.clicked_pos.connect(self.seek_video)
         self.timeline.dragging.connect(self.seek_video)
         self.timeline.segment_selected.connect(self.on_segment_selected)
+        self.timeline.segment_modified.connect(
+            self.on_segment_modified
+        )  # Connect new signal
         self.timeline.behavior_types = self.behavior_types
         self.timeline.installEventFilter(self)
         right_layout.addWidget(self.timeline, 1)
@@ -443,6 +451,21 @@ class AnnotatorGUI(QMainWindow):
     def on_segment_selected(self, segment):
         """Handle segment selection."""
         pass
+
+    def on_segment_modified(self, segment):
+        """Update frame numbers when segment is modified by dragging."""
+        if not self.cap or not self.current_video_name:
+            return
+
+        fps = self.videos[self.current_video_name]["fps"]
+
+        # Recalculate frame numbers based on times
+        segment.start_frame = int(segment.start_time * fps)
+        if segment.end_time is not None:
+            segment.end_frame = int(segment.end_time * fps)
+
+        # Save updated segments
+        self.videos[self.current_video_name]["segments"] = self.timeline.segments.copy()
 
     def update_behavior_list(self):
         """Update the behavior list with hotkey labels."""
