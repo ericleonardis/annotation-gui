@@ -607,6 +607,7 @@ class AnnotatorGUI(QMainWindow):
             1, QHeaderView.ResizeToContents
         )
         self.behavior_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.behavior_table.setEditTriggers(QAbstractItemView.DoubleClicked)
         self.behavior_table.setFixedHeight(150)
         self.behavior_table.itemChanged.connect(self.on_behavior_table_changed)
         self.behavior_table.installEventFilter(self)
