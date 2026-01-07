@@ -479,7 +479,7 @@ class AnnotatorGUI(QMainWindow):
             None
         """
         super().__init__()
-        self.setWindowTitle("Python Behavior Annotator (ChronoViz Style)")
+        self.setWindowTitle("Python Behavior Annotator")
         self.setGeometry(100, 100, 1200, 700)
 
         # Video management
@@ -693,14 +693,20 @@ class AnnotatorGUI(QMainWindow):
                 QMessageBox.warning(
                     self, "Invalid Name", "Behavior name cannot be empty."
                 )
-                self.update_behavior_table()
+                # Revert to original name without recreating table
+                self.behavior_table.blockSignals(True)
+                item.setText(old_behavior)
+                self.behavior_table.blockSignals(False)
                 return
 
             if new_name != old_behavior and new_name in self.behavior_types:
                 QMessageBox.warning(
                     self, "Duplicate Name", f"Behavior '{new_name}' already exists."
                 )
-                self.update_behavior_table()
+                # Revert to original name without recreating table
+                self.behavior_table.blockSignals(True)
+                item.setText(old_behavior)
+                self.behavior_table.blockSignals(False)
                 return
 
             # Update behavior name everywhere
@@ -729,6 +735,10 @@ class AnnotatorGUI(QMainWindow):
                 if seg.name == old_behavior:
                     seg.name = new_name
 
+            # Update active hotkeys tracking
+            if old_behavior in self.active_hotkeys:
+                self.active_hotkeys[new_name] = self.active_hotkeys.pop(old_behavior)
+
             self.timeline.update_behavior_types(self.behavior_types)
             self.timeline.update()
 
@@ -739,6 +749,8 @@ class AnnotatorGUI(QMainWindow):
                 # Remove hotkey
                 if old_behavior in self.behavior_hotkeys:
                     del self.behavior_hotkeys[old_behavior]
+                # Update legacy list after removing hotkey
+                self.update_behavior_list()
                 return
 
             # Validate hotkey (single character or number)
@@ -746,7 +758,15 @@ class AnnotatorGUI(QMainWindow):
                 QMessageBox.warning(
                     self, "Invalid Hotkey", "Hotkey must be a single letter or number."
                 )
-                self.update_behavior_table()
+                # Revert to original hotkey without recreating table
+                self.behavior_table.blockSignals(True)
+                if old_behavior in self.behavior_hotkeys:
+                    old_key = self.behavior_hotkeys[old_behavior]
+                    old_key_text = QKeySequence(old_key).toString()
+                    item.setText(old_key_text)
+                else:
+                    item.setText("")
+                self.behavior_table.blockSignals(False)
                 return
 
             # Get Qt key code
@@ -762,7 +782,15 @@ class AnnotatorGUI(QMainWindow):
                     "Invalid Hotkey",
                     f"'{new_hotkey_text}' is not a valid hotkey.",
                 )
-                self.update_behavior_table()
+                # Revert to original hotkey without recreating table
+                self.behavior_table.blockSignals(True)
+                if old_behavior in self.behavior_hotkeys:
+                    old_key = self.behavior_hotkeys[old_behavior]
+                    old_key_text = QKeySequence(old_key).toString()
+                    item.setText(old_key_text)
+                else:
+                    item.setText("")
+                self.behavior_table.blockSignals(False)
                 return
 
             # Check if hotkey is already in use
@@ -773,11 +801,24 @@ class AnnotatorGUI(QMainWindow):
                         "Hotkey In Use",
                         f"Hotkey '{new_hotkey_text}' is already assigned to '{behavior}'.",
                     )
-                    self.update_behavior_table()
+                    # Revert to original hotkey without recreating table
+                    self.behavior_table.blockSignals(True)
+                    if old_behavior in self.behavior_hotkeys:
+                        old_key = self.behavior_hotkeys[old_behavior]
+                        old_key_text = QKeySequence(old_key).toString()
+                        item.setText(old_key_text)
+                    else:
+                        item.setText("")
+                    self.behavior_table.blockSignals(False)
                     return
 
             # Assign new hotkey
             self.behavior_hotkeys[old_behavior] = key_code
+
+            # Update the displayed text to uppercase (already done above)
+            self.behavior_table.blockSignals(True)
+            item.setText(new_hotkey_text)
+            self.behavior_table.blockSignals(False)
 
         # Update legacy behavior list
         self.update_behavior_list()
