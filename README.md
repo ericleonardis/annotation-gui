@@ -462,7 +462,7 @@ Contributions are welcome! Please:
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/yourusername/AnnotationGUI/issues)
-- **Email**: your.email@example.com
+- **Email**: leonardiseric@gmail.com
 
 ## Acknowledgments
 
