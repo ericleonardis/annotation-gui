@@ -479,7 +479,7 @@ class AnnotatorGUI(QMainWindow):
             None
         """
         super().__init__()
-        self.setWindowTitle("Python Behavior Annotator")
+        self.setWindowTitle("Python Behavior Annotator (ChronoViz Style)")
         self.setGeometry(100, 100, 1200, 700)
 
         # Video management
@@ -596,7 +596,7 @@ class AnnotatorGUI(QMainWindow):
         self.btn_play = QPushButton("Play/Pause (Space)")
         self.btn_play.clicked.connect(self.toggle_play)
 
-        # Behavior table
+        # Behavior table (new)
         self.behavior_table = QTableWidget()
         self.behavior_table.setColumnCount(2)
         self.behavior_table.setHorizontalHeaderLabels(["Behavior Name", "Hotkey"])
@@ -611,6 +611,12 @@ class AnnotatorGUI(QMainWindow):
         self.behavior_table.itemChanged.connect(self.on_behavior_table_changed)
         self.behavior_table.installEventFilter(self)
         self.update_behavior_table()
+
+        # Keep legacy behavior_list as a list widget for backward compatibility
+        self.behavior_list = QListWidget()
+        self.behavior_list.installEventFilter(self)
+        self.behavior_list.setVisible(False)  # Hide but keep for tests
+        self.update_behavior_list()
 
         ctrl_layout.addWidget(self.btn_play)
         ctrl_layout.addWidget(self.behavior_table)
@@ -773,6 +779,9 @@ class AnnotatorGUI(QMainWindow):
             # Assign new hotkey
             self.behavior_hotkeys[old_behavior] = key_code
 
+        # Update legacy behavior list
+        self.update_behavior_list()
+
     def update_behavior_list(self) -> None:
         """Update the behavior list widget with current behaviors and hotkeys.
 
@@ -785,9 +794,14 @@ class AnnotatorGUI(QMainWindow):
         Returns:
             None
         """
-        # This method is now replaced by update_behavior_table
-        # Keep for backward compatibility if needed
-        self.update_behavior_table()
+        self.behavior_list.clear()
+        for behavior in self.behavior_types:
+            if behavior in self.behavior_hotkeys:
+                key = self.behavior_hotkeys[behavior]
+                key_name = QKeySequence(key).toString()
+                self.behavior_list.addItem(f"{behavior} ({key_name})")
+            else:
+                self.behavior_list.addItem(behavior)
 
     def add_new_behavior(self) -> None:
         """Add a new behavior type via user input dialog.
@@ -864,6 +878,7 @@ class AnnotatorGUI(QMainWindow):
 
             self.timeline.update_behavior_types(self.behavior_types)
             self.update_behavior_table()
+            self.update_behavior_list()
 
             min_height = 20 + len(self.behavior_types) * 45
             self.timeline.setMinimumHeight(min_height)
@@ -921,6 +936,7 @@ class AnnotatorGUI(QMainWindow):
 
                 self.timeline.update_behavior_types(self.behavior_types)
                 self.update_behavior_table()
+                self.update_behavior_list()
                 self.timeline.update()
 
                 min_height = 20 + len(self.behavior_types) * 45
@@ -954,15 +970,18 @@ class AnnotatorGUI(QMainWindow):
                 self.toggle_play()
                 return True
             elif event.key() in (Qt.Key_Enter, Qt.Key_Return):
-                if (
+                # Handle Enter on behavior_list (for tests)
+                if obj == self.behavior_list:
+                    self.handle_annotation()
+                    return True
+                # Handle Enter on behavior_table
+                elif (
                     obj == self.behavior_table
                     and self.behavior_table.state() != QAbstractItemView.EditingState
                 ):
-                    # Get selected row
                     current_row = self.behavior_table.currentRow()
                     if current_row >= 0 and current_row < len(self.behavior_types):
                         behavior = self.behavior_types[current_row]
-                        # Toggle annotation for selected behavior
                         if self.active_hotkeys.get(behavior, False):
                             self.stop_behavior_annotation(behavior)
                         else:
