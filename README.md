@@ -360,7 +360,7 @@ video2.mp4,Groom,2.1,4.5,63,135
 
 ### Video won't load
 - Ensure video codec is supported by OpenCV
-- Try converting to MP4 with H.264: `ffmpeg -i input.avi -c:v libx264 output.mp4`
+- Try converting to MP4 with H.264, these settings will ensure seekability: `ffmpeg -y -i "input.mp4" -c:v libx264 -pix_fmt yuv420p -preset superfast -crf 23 "output.mp4"`
 
 ### Hotkey not working after reassignment
 - Make sure you pressed Enter after editing the cell
