@@ -522,6 +522,297 @@ class TestCSVExport:
             assert rows[1][3] == ""  # Empty end time
             assert rows[1][5] == ""  # Empty end frame
 
+    def test_export_after_deleting_segment(self, gui, temp_csv):
+        """Test CSV export after deleting a segment."""
+        # Add three segments
+        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg2 = BehaviorSegment("Rear", 3.0, 4.0, 90, 120)
+        seg3 = BehaviorSegment("Groom", 5.0, 6.0, 150, 180)
+
+        gui.timeline.segments.extend([seg1, seg2, seg3])
+        gui.videos[gui.current_video_name]["segments"] = [seg1, seg2, seg3]
+
+        # Delete the middle segment
+        gui.timeline.selected_segment = seg2
+        gui.timeline.delete_selected_segment()
+        gui.videos[gui.current_video_name]["segments"] = gui.timeline.segments.copy()
+
+        # Export
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                gui.export_csv()
+
+        with open(temp_csv, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            assert len(rows) == 3  # Header + 2 remaining segments
+
+            # Verify the remaining segments
+            behaviors = [row[1] for row in rows[1:]]
+            assert "Immobility" in behaviors
+            assert "Groom" in behaviors
+            assert "Rear" not in behaviors
+
+    def test_export_with_long_video_duration(self, qapp, tmp_path, temp_csv):
+        """Test CSV with very long video durations."""
+        # Create a long video (simulating 1 hour)
+        long_video_path = tmp_path / "long_video.mp4"
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fps = 30.0
+        duration_seconds = 3600  # 1 hour
+
+        # We'll create a video with metadata but minimal frames
+        out = cv2.VideoWriter(str(long_video_path), fourcc, fps, (640, 480))
+
+        # Write just a few frames (OpenCV will allow seeking to any position)
+        for i in range(90):  # 3 seconds of actual frames
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            out.write(frame)
+        out.release()
+
+        # Manually set up a video with long duration
+        window = AnnotatorGUI()
+        window.show()
+
+        # Mock loading the video
+        with patch(
+            "annotation_GUI.QFileDialog.getOpenFileNames",
+            return_value=([str(long_video_path)], ""),
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                window.load_video()
+
+        # Manually set long duration
+        video_name = window.current_video_name
+        window.videos[video_name]["duration"] = 3600.0  # 1 hour
+        window.timeline.duration = 3600.0
+
+        # Add annotations at various points throughout the hour
+        seg1 = BehaviorSegment("Immobility", 600.0, 900.0, 18000, 27000)  # 10-15 min
+        seg2 = BehaviorSegment("Rear", 1800.0, 2100.0, 54000, 63000)  # 30-35 min
+        seg3 = BehaviorSegment("Groom", 3300.0, 3500.0, 99000, 105000)  # 55-58 min
+
+        window.timeline.segments.extend([seg1, seg2, seg3])
+        window.videos[video_name]["segments"] = [seg1, seg2, seg3]
+
+        # Export
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                window.export_csv()
+
+        # Verify export
+        with open(temp_csv, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            assert len(rows) == 4  # Header + 3 segments
+
+            # Check that large times are correctly exported
+            assert float(rows[1][2]) == 600.0
+            assert float(rows[1][3]) == 900.0
+            assert int(rows[1][4]) == 18000
+            assert int(rows[1][5]) == 27000
+
+            assert float(rows[3][2]) == 3300.0
+            assert int(rows[3][5]) == 105000
+
+        window.close()
+
+    def test_export_with_special_characters_in_behavior_names(self, gui, temp_csv):
+        """Test CSV with special characters in behavior names."""
+        # Create behaviors with various special characters
+        special_behaviors = [
+            "Walk & Run",
+            "Groom (Head)",
+            "Rear-Up",
+            "Rest/Sleep",
+            'Jump "High"',
+            "Sniff, Investigate",
+            "Behavior #1",
+            "Test'Behavior",
+        ]
+
+        segments = []
+        start_time = 1.0
+
+        for behavior in special_behaviors:
+            seg = BehaviorSegment(
+                behavior,
+                start_time,
+                start_time + 1.0,
+                int(start_time * 30),
+                int((start_time + 1.0) * 30),
+            )
+            segments.append(seg)
+            start_time += 2.0
+
+        gui.timeline.segments.extend(segments)
+        gui.videos[gui.current_video_name]["segments"] = segments
+
+        # Export
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                gui.export_csv()
+
+        # Verify all special character behaviors are exported correctly
+        with open(temp_csv, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            assert len(rows) == len(special_behaviors) + 1  # Header + all behaviors
+
+            exported_behaviors = [row[1] for row in rows[1:]]
+            for behavior in special_behaviors:
+                assert behavior in exported_behaviors
+
+    def test_export_with_read_only_file(self, gui, tmp_path):
+        """Test CSV export with file permission errors."""
+        read_only_csv = tmp_path / "readonly.csv"
+
+        # Create a read-only file
+        read_only_csv.touch()
+        read_only_csv.chmod(0o444)  # Read-only permissions
+
+        try:
+            # Attempt to export to read-only file
+            with patch(
+                "annotation_GUI.QFileDialog.getSaveFileName",
+                return_value=(str(read_only_csv), ""),
+            ):
+                # Add a segment
+                seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+                gui.timeline.segments.append(seg)
+                gui.videos[gui.current_video_name]["segments"] = [seg]
+
+                # The export should fail (either silently or with an error)
+                # We're testing that it doesn't crash the application
+                try:
+                    gui.export_csv()
+                except (PermissionError, IOError):
+                    # Expected behavior - permission denied
+                    pass
+        finally:
+            # Restore write permissions for cleanup
+            read_only_csv.chmod(0o644)
+
+    def test_export_to_nonexistent_directory(self, gui):
+        """Test CSV export to a directory that doesn't exist."""
+        nonexistent_path = "/nonexistent/directory/test.csv"
+
+        # Add a segment
+        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        gui.timeline.segments.append(seg)
+        gui.videos[gui.current_video_name]["segments"] = [seg]
+
+        # Attempt to export to nonexistent directory
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName",
+            return_value=(nonexistent_path, ""),
+        ):
+            try:
+                gui.export_csv()
+            except (FileNotFoundError, IOError):
+                # Expected behavior - directory doesn't exist
+                pass
+
+    def test_export_with_unicode_behavior_names(self, gui, temp_csv):
+        """Test CSV with Unicode characters in behavior names."""
+        unicode_behaviors = [
+            "Grooming 🧹",
+            "Walking →",
+            "Resting 😴",
+            "探索",  # Chinese characters
+            "Поведение",  # Russian characters
+            "Comportement",  # French with accent
+        ]
+
+        segments = []
+        start_time = 1.0
+
+        for behavior in unicode_behaviors:
+            seg = BehaviorSegment(
+                behavior,
+                start_time,
+                start_time + 1.0,
+                int(start_time * 30),
+                int((start_time + 1.0) * 30),
+            )
+            segments.append(seg)
+            start_time += 2.0
+
+        gui.timeline.segments.extend(segments)
+        gui.videos[gui.current_video_name]["segments"] = segments
+
+        # Export
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                gui.export_csv()
+
+        # Verify Unicode behaviors are exported correctly
+        with open(temp_csv, "r", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+            exported_behaviors = [row[1] for row in rows[1:]]
+            for behavior in unicode_behaviors:
+                assert behavior in exported_behaviors
+
+    def test_export_preserves_segment_order(self, gui, temp_csv):
+        """Test that CSV export preserves the order of segments."""
+        # Add segments in non-chronological order
+        seg3 = BehaviorSegment("Groom", 5.0, 6.0, 150, 180)
+        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg2 = BehaviorSegment("Rear", 3.0, 4.0, 90, 120)
+
+        # Add in specific order
+        gui.timeline.segments.extend([seg3, seg1, seg2])
+        gui.videos[gui.current_video_name]["segments"] = [seg3, seg1, seg2]
+
+        # Export
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                gui.export_csv()
+
+        # Verify order is preserved
+        with open(temp_csv, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+            # Check that segments appear in the same order they were added
+            assert rows[1][1] == "Groom"
+            assert rows[2][1] == "Immobility"
+            assert rows[3][1] == "Rear"
+
+    def test_export_with_zero_duration_segment(self, gui, temp_csv):
+        """Test exporting segment with zero or very small duration."""
+        # Create a segment with very small duration
+        seg = BehaviorSegment("Immobility", 1.0, 1.001, 30, 30)
+        gui.timeline.segments.append(seg)
+        gui.videos[gui.current_video_name]["segments"] = [seg]
+
+        # Export
+        with patch(
+            "annotation_GUI.QFileDialog.getSaveFileName", return_value=(temp_csv, "")
+        ):
+            with patch("annotation_GUI.QMessageBox.information"):
+                gui.export_csv()
+
+        # Verify it exports correctly
+        with open(temp_csv, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            assert len(rows) == 2
+            assert float(rows[1][2]) == 1.0
+            assert float(rows[1][3]) == 1.001
+
 
 class TestVideoSeek:
     """Test video seeking functionality."""
