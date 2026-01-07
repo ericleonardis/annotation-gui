@@ -27,7 +27,7 @@ A PyQt5-based GUI application for annotating animal behavior in videos, inspired
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/AnnotationGUI.git
+git clone https://github.com/ericleonardis/annotation-gui
 
 # Navigate to the project directory
 cd AnnotationGUI
