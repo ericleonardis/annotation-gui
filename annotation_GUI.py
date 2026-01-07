@@ -3,6 +3,7 @@ import cv2
 import csv
 import os
 import random
+from typing import Optional, List, Dict, Tuple, Any
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -14,13 +15,24 @@ from PyQt5.QtWidgets import (
     QLabel,
     QSlider,
     QListWidget,
+    QListWidgetItem,
     QAction,
     QMessageBox,
     QInputDialog,
     QSplitter,
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QRect, QPoint
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QKeySequence
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QRect, QPoint, QEvent
+from PyQt5.QtGui import (
+    QImage,
+    QPixmap,
+    QPainter,
+    QColor,
+    QPen,
+    QKeySequence,
+    QPaintEvent,
+    QMouseEvent,
+    QKeyEvent,
+)
 
 
 # Color palette inspired by seaborn/tableau colors
@@ -44,32 +56,75 @@ COLOR_PALETTE = [
 
 
 class BehaviorSegment:
+    """Represents a time segment of a specific behavior in a video.
+
+    This class manages behavior annotations with start/end times and frames,
+    and automatically assigns distinct colors to different behaviors.
+
+    Attributes:
+        name (str): The name of the behavior.
+        start_time (float): Start time in seconds.
+        end_time (Optional[float]): End time in seconds, or None if ongoing.
+        start_frame (Optional[int]): Start frame number.
+        end_frame (Optional[int]): End frame number.
+        color (QColor): The color assigned to this behavior type.
+        _color_map (Dict[str, QColor]): Class-level mapping of behaviors to colors.
+        _used_colors (set): Set of RGB tuples already assigned to behaviors.
+    """
+
     # Class variable to store color mapping
-    _color_map = {
+    _color_map: Dict[str, QColor] = {
         "Immobility": QColor(255, 100, 100, 150),
         "Rear": QColor(100, 255, 100, 150),
         "Groom": QColor(100, 150, 255, 150),
     }
-    _used_colors = set([(255, 100, 100), (100, 255, 100), (100, 150, 255)])
+    _used_colors: set = set([(255, 100, 100), (100, 255, 100), (100, 150, 255)])
 
     def __init__(
-        self, name, start_time, end_time=None, start_frame=None, end_frame=None
-    ):
-        self.name = name
-        self.start_time = start_time
-        self.end_time = end_time
-        self.start_frame = start_frame
-        self.end_frame = end_frame
+        self,
+        name: str,
+        start_time: float,
+        end_time: Optional[float] = None,
+        start_frame: Optional[int] = None,
+        end_frame: Optional[int] = None,
+    ) -> None:
+        """Initialize a behavior segment.
+
+        Args:
+            name: The name of the behavior (e.g., "Immobility", "Groom").
+            start_time: Start time of the behavior in seconds.
+            end_time: End time of the behavior in seconds. None if still ongoing.
+            start_frame: Frame number at start time. None if not yet calculated.
+            end_frame: Frame number at end time. None if not yet calculated.
+
+        Returns:
+            None
+        """
+        self.name: str = name
+        self.start_time: float = start_time
+        self.end_time: Optional[float] = end_time
+        self.start_frame: Optional[int] = start_frame
+        self.end_frame: Optional[int] = end_frame
 
         # Get or assign color for this behavior
         if name not in BehaviorSegment._color_map:
             BehaviorSegment._color_map[name] = BehaviorSegment._get_new_color()
 
-        self.color = BehaviorSegment._color_map[name]
+        self.color: QColor = BehaviorSegment._color_map[name]
 
     @classmethod
-    def _get_new_color(cls):
-        """Get a new distinct color from the palette."""
+    def _get_new_color(cls) -> QColor:
+        """Get a new distinct color from the palette for a behavior.
+
+        Selects an unused color from COLOR_PALETTE. If all colors are used,
+        generates a random bright color.
+
+        Args:
+            None
+
+        Returns:
+            QColor: A new color with alpha channel set to 150 for transparency.
+        """
         # Find unused colors from palette
         available_colors = [c for c in COLOR_PALETTE if c not in cls._used_colors]
 
@@ -88,8 +143,18 @@ class BehaviorSegment:
         return QColor(color_rgb[0], color_rgb[1], color_rgb[2], 150)
 
     @classmethod
-    def remove_behavior_color(cls, behavior_name):
-        """Remove a behavior's color mapping."""
+    def remove_behavior_color(cls, behavior_name: str) -> None:
+        """Remove a behavior's color mapping when behavior is deleted.
+
+        Frees up the color for reuse and removes the behavior from the
+        color mapping dictionary.
+
+        Args:
+            behavior_name: The name of the behavior to remove.
+
+        Returns:
+            None
+        """
         if behavior_name in cls._color_map:
             color = cls._color_map[behavior_name]
             color_tuple = (color.red(), color.green(), color.blue())
@@ -99,49 +164,105 @@ class BehaviorSegment:
 
 
 class TimelineWidget(QWidget):
+    """Interactive timeline widget for visualizing and editing behavior segments.
+
+    Displays a horizontal timeline with behavior rows. Users can click to scrub,
+    drag segment edges to adjust times, and select segments.
+
+    Signals:
+        clicked_pos (float): Emitted when timeline is clicked with time position.
+        dragging (float): Emitted while dragging with current time position.
+        segment_selected (BehaviorSegment or None): Emitted when segment selection changes.
+        segment_modified (BehaviorSegment): Emitted when segment is modified by dragging.
+
+    Attributes:
+        duration (float): Total duration of the video in seconds.
+        current_time (float): Current playback position in seconds.
+        segments (List[BehaviorSegment]): List of behavior segments to display.
+        behavior_types (List[str]): List of behavior names to show as rows.
+        selected_segment (Optional[BehaviorSegment]): Currently selected segment.
+    """
+
     clicked_pos = pyqtSignal(float)
     dragging = pyqtSignal(float)
     segment_selected = pyqtSignal(object)
-    segment_modified = pyqtSignal(object)  # New signal
+    segment_modified = pyqtSignal(object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        """Initialize the timeline widget.
+
+        Args:
+            parent: Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
-        self.duration = 1.0
-        self.current_time = 0.0
-        self.segments = []
+        self.duration: float = 1.0
+        self.current_time: float = 0.0
+        self.segments: List[BehaviorSegment] = []
         self.setMinimumHeight(150)
-        self.active_behavior = None
+        self.active_behavior: Optional[str] = None
 
         # Drag state
-        self.is_dragging = False
-        self.drag_segment = None
-        self.drag_edge = None
-        self.EDGE_THRESHOLD = 10
+        self.is_dragging: bool = False
+        self.drag_segment: Optional[BehaviorSegment] = None
+        self.drag_edge: Optional[str] = None
+        self.EDGE_THRESHOLD: int = 10
 
         # Scrubbing state
-        self.is_scrubbing = False
+        self.is_scrubbing: bool = False
 
         # Selection state
-        self.selected_segment = None
+        self.selected_segment: Optional[BehaviorSegment] = None
 
         # Behavior rows
-        self.behavior_types = ["Immobility", "Rear", "Groom"]
-        self.row_height = 40
+        self.behavior_types: List[str] = ["Immobility", "Rear", "Groom"]
+        self.row_height: int = 40
 
-    def update_behavior_types(self, behaviors):
-        """Update the list of behavior types."""
+    def update_behavior_types(self, behaviors: List[str]) -> None:
+        """Update the list of behavior types displayed as rows.
+
+        Args:
+            behaviors: List of behavior names to display.
+
+        Returns:
+            None
+        """
         self.behavior_types = behaviors
         self.update()
 
-    def get_behavior_row(self, behavior_name):
-        """Get the y position for a behavior type."""
+    def get_behavior_row(self, behavior_name: str) -> int:
+        """Get the y-coordinate position for a behavior type's row.
+
+        Args:
+            behavior_name: Name of the behavior.
+
+        Returns:
+            int: Y-coordinate of the top of the behavior's row in pixels.
+        """
         if behavior_name in self.behavior_types:
             idx = self.behavior_types.index(behavior_name)
             return 10 + idx * (self.row_height + 5)
         return 10
 
-    def get_segment_at_pos(self, x, y):
-        """Find segment and edge at given position."""
+    def get_segment_at_pos(
+        self, x: int, y: int
+    ) -> Tuple[Optional[BehaviorSegment], Optional[str]]:
+        """Find segment and edge at given mouse position.
+
+        Determines if the position is on a segment's start edge, end edge,
+        or body.
+
+        Args:
+            x: X-coordinate in pixels.
+            y: Y-coordinate in pixels.
+
+        Returns:
+            Tuple of (segment, edge) where:
+                - segment: BehaviorSegment if found, None otherwise
+                - edge: "start", "end", or "body" if segment found, None otherwise
+        """
         w = self.width()
 
         for seg in self.segments:
@@ -164,7 +285,22 @@ class TimelineWidget(QWidget):
 
         return None, None
 
-    def paintEvent(self, event):
+    def paintEvent(self, event: QPaintEvent) -> None:
+        """Paint the timeline with behavior rows, segments, and playhead.
+
+        Draws:
+            - Dark background
+            - Behavior row labels and dividers
+            - Behavior segments as colored rectangles
+            - Selected segment with yellow border
+            - Red vertical playhead line
+
+        Args:
+            event: The paint event.
+
+        Returns:
+            None
+        """
         painter = QPainter(self)
         w, h = self.width(), self.height()
 
@@ -201,7 +337,18 @@ class TimelineWidget(QWidget):
         painter.setPen(QPen(Qt.red, 2))
         painter.drawLine(int(px), 0, int(px), h)
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Handle mouse press for segment selection and timeline scrubbing.
+
+        Determines if user clicked on segment edge (for dragging), segment body
+        (for selection), or empty space (for scrubbing).
+
+        Args:
+            event: The mouse event containing position and button info.
+
+        Returns:
+            None
+        """
         seg, edge = self.get_segment_at_pos(event.x(), event.y())
 
         if seg and edge in ["start", "end"]:
@@ -224,7 +371,18 @@ class TimelineWidget(QWidget):
             self.clicked_pos.emit(pos)
             self.update()
 
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        """Handle mouse movement for segment edge dragging or timeline scrubbing.
+
+        Updates segment times when dragging edges, ensuring start stays before end.
+        Updates cursor appearance when hovering over edges.
+
+        Args:
+            event: The mouse event containing current position.
+
+        Returns:
+            None
+        """
         if self.is_dragging and self.drag_segment:
             new_time = (event.x() / self.width()) * self.duration
             new_time = max(0, min(self.duration, new_time))
@@ -250,7 +408,18 @@ class TimelineWidget(QWidget):
             else:
                 self.setCursor(Qt.ArrowCursor)
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        """Handle mouse release to finalize segment dragging or scrubbing.
+
+        Emits segment_modified signal if a segment was being dragged.
+        Resets drag and scrub states.
+
+        Args:
+            event: The mouse event.
+
+        Returns:
+            None
+        """
         # Emit signal if segment was being dragged
         if self.is_dragging and self.drag_segment:
             self.segment_modified.emit(self.drag_segment)
@@ -261,8 +430,12 @@ class TimelineWidget(QWidget):
         self.drag_edge = None
         self.setCursor(Qt.ArrowCursor)
 
-    def delete_selected_segment(self):
-        """Delete the currently selected segment."""
+    def delete_selected_segment(self) -> bool:
+        """Delete the currently selected segment from the timeline.
+
+        Returns:
+            bool: True if a segment was deleted, False otherwise.
+        """
         if self.selected_segment and self.selected_segment in self.segments:
             self.segments.remove(self.selected_segment)
             self.selected_segment = None
@@ -273,41 +446,82 @@ class TimelineWidget(QWidget):
 
 
 class AnnotatorGUI(QMainWindow):
-    def __init__(self):
+    """Main application window for video behavior annotation.
+
+    Provides interface for:
+        - Loading multiple videos
+        - Annotating behaviors with keyboard hotkeys
+        - Visualizing and editing annotations on timeline
+        - Exporting annotations to CSV
+
+    Attributes:
+        videos (Dict[str, Dict]): Dictionary mapping video names to their data.
+        current_video_name (Optional[str]): Name of currently active video.
+        cap (Optional[cv2.VideoCapture]): OpenCV video capture object.
+        is_playing (bool): Whether video is currently playing.
+        behavior_types (List[str]): List of all behavior types.
+        behavior_hotkeys (Dict[str, int]): Mapping of behaviors to Qt key codes.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the annotator GUI application.
+
+        Sets up the main window, initializes state variables, and creates the UI.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         super().__init__()
         self.setWindowTitle("Python Behavior Annotator (ChronoViz Style)")
         self.setGeometry(100, 100, 1200, 700)
 
         # Video management
-        self.videos = {}
-        self.current_video_name = None
+        self.videos: Dict[str, Dict[str, Any]] = {}
+        self.current_video_name: Optional[str] = None
 
         # State
-        self.cap = None
-        self.is_playing = False
-        self.current_seg = None
+        self.cap: Optional[cv2.VideoCapture] = None
+        self.is_playing: bool = False
+        self.current_seg: Optional[BehaviorSegment] = None
 
         # Hotkey tracking
-        self.active_hotkeys = {}
+        self.active_hotkeys: Dict[str, Any] = {}
 
         # Behavior hotkey mapping
-        self.behavior_hotkeys = {
+        self.behavior_hotkeys: Dict[str, int] = {
             "Immobility": Qt.Key_I,
             "Rear": Qt.Key_R,
             "Groom": Qt.Key_G,
         }
 
         # Global behavior types
-        self.behavior_types = ["Immobility", "Rear", "Groom"]
+        self.behavior_types: List[str] = ["Immobility", "Rear", "Groom"]
 
         # UI Setup
         self.init_ui()
 
         # Timer for video playback
-        self.timer = QTimer()
+        self.timer: QTimer = QTimer()
         self.timer.timeout.connect(self.update_frame)
 
-    def init_ui(self):
+    def init_ui(self) -> None:
+        """Initialize and layout all UI components.
+
+        Creates:
+            - Left panel with video list
+            - Right panel with video display, timeline, and controls
+            - Menu bar with File and Behaviors menus
+            - Splitter to resize panels
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QHBoxLayout(main_widget)
@@ -368,9 +582,7 @@ class AnnotatorGUI(QMainWindow):
         self.timeline.clicked_pos.connect(self.seek_video)
         self.timeline.dragging.connect(self.seek_video)
         self.timeline.segment_selected.connect(self.on_segment_selected)
-        self.timeline.segment_modified.connect(
-            self.on_segment_modified
-        )  # Connect new signal
+        self.timeline.segment_modified.connect(self.on_segment_modified)
         self.timeline.behavior_types = self.behavior_types
         self.timeline.installEventFilter(self)
         right_layout.addWidget(self.timeline, 1)
@@ -398,8 +610,21 @@ class AnnotatorGUI(QMainWindow):
 
         layout.addWidget(splitter)
 
-    def switch_video(self, current, previous):
-        """Switch to a different video."""
+    def switch_video(
+        self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]
+    ) -> None:
+        """Switch to a different video from the video list.
+
+        Saves annotations for the previous video and loads the selected video
+        with its associated annotations.
+
+        Args:
+            current: The newly selected list item.
+            previous: The previously selected list item.
+
+        Returns:
+            None
+        """
         if current is None:
             return
 
@@ -427,8 +652,18 @@ class AnnotatorGUI(QMainWindow):
             self.timeline.update()
             self.update_frame()
 
-    def remove_video(self):
-        """Remove the currently selected video."""
+    def remove_video(self) -> None:
+        """Remove the currently selected video and its annotations.
+
+        Prompts user for confirmation before deleting. Releases video capture
+        if the removed video is currently active.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         current_item = self.video_list.currentItem()
         if current_item:
             video_name = current_item.text()
@@ -448,12 +683,32 @@ class AnnotatorGUI(QMainWindow):
                         self.cap.release()
                         self.cap = None
 
-    def on_segment_selected(self, segment):
-        """Handle segment selection."""
+    def on_segment_selected(self, segment: Optional[BehaviorSegment]) -> None:
+        """Handle segment selection event from timeline.
+
+        Callback for when user clicks on a segment in the timeline.
+        Currently a placeholder for future functionality.
+
+        Args:
+            segment: The selected segment, or None if selection was cleared.
+
+        Returns:
+            None
+        """
         pass
 
-    def on_segment_modified(self, segment):
-        """Update frame numbers when segment is modified by dragging."""
+    def on_segment_modified(self, segment: BehaviorSegment) -> None:
+        """Update frame numbers when segment is modified by dragging.
+
+        Recalculates start_frame and end_frame based on the updated
+        start_time and end_time after user drags segment edges.
+
+        Args:
+            segment: The segment that was modified.
+
+        Returns:
+            None
+        """
         if not self.cap or not self.current_video_name:
             return
 
@@ -467,8 +722,18 @@ class AnnotatorGUI(QMainWindow):
         # Save updated segments
         self.videos[self.current_video_name]["segments"] = self.timeline.segments.copy()
 
-    def update_behavior_list(self):
-        """Update the behavior list with hotkey labels."""
+    def update_behavior_list(self) -> None:
+        """Update the behavior list widget with current behaviors and hotkeys.
+
+        Refreshes the display to show behavior names with their assigned
+        keyboard shortcuts in parentheses.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self.behavior_list.clear()
         for behavior in self.behavior_types:
             if behavior in self.behavior_hotkeys:
@@ -478,8 +743,18 @@ class AnnotatorGUI(QMainWindow):
             else:
                 self.behavior_list.addItem(behavior)
 
-    def add_new_behavior(self):
-        """Add a new behavior type."""
+    def add_new_behavior(self) -> None:
+        """Add a new behavior type via user input dialog.
+
+        Prompts user for behavior name, assigns a hotkey based on first letter,
+        and updates all relevant UI components.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         text, ok = QInputDialog.getText(
             self, "Add New Behavior", "Enter behavior name:"
         )
@@ -500,8 +775,18 @@ class AnnotatorGUI(QMainWindow):
                 min_height = 20 + len(self.behavior_types) * 45
                 self.timeline.setMinimumHeight(min_height)
 
-    def delete_behavior(self):
-        """Delete a behavior type from all videos."""
+    def delete_behavior(self) -> None:
+        """Delete a behavior type from all videos after confirmation.
+
+        Removes the behavior from all videos' annotations, deletes its color
+        mapping, removes its hotkey, and updates the UI.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         behaviors = self.behavior_types
         if not behaviors:
             QMessageBox.warning(self, "No Behaviors", "No behaviors to delete.")
@@ -548,9 +833,24 @@ class AnnotatorGUI(QMainWindow):
                 min_height = 20 + len(self.behavior_types) * 45
                 self.timeline.setMinimumHeight(max(150, min_height))
 
-    def eventFilter(self, obj, event):
+    def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
+        """Filter keyboard events for global hotkey handling.
+
+        Intercepts key presses/releases on child widgets to handle:
+            - Space: Play/pause
+            - Enter: Start/stop annotation (on behavior list)
+            - Delete/Backspace: Delete selected segment
+            - Behavior hotkeys: Start/stop behavior annotation
+
+        Args:
+            obj: The widget that received the event.
+            event: The event to filter.
+
+        Returns:
+            bool: True if event was handled, False to pass it on.
+        """
         # Handle keyboard events for all child widgets
-        if event.type() == event.KeyPress:
+        if event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Space:
                 self.toggle_play()
                 return True
@@ -571,7 +871,7 @@ class AnnotatorGUI(QMainWindow):
                     if event.key() == key and not event.isAutoRepeat():
                         self.start_behavior_annotation(behavior)
                         return True
-        elif event.type() == event.KeyRelease:
+        elif event.type() == QEvent.KeyRelease:
             # Handle hotkey release
             for behavior, key in self.behavior_hotkeys.items():
                 if event.key() == key and not event.isAutoRepeat():
@@ -581,10 +881,20 @@ class AnnotatorGUI(QMainWindow):
 
         return super().eventFilter(obj, event)
 
-    def load_video(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, "Open Videos"
-        )  # Changed to getOpenFileNames
+    def load_video(self) -> None:
+        """Load one or more video files via file dialog.
+
+        Opens file picker for selecting videos, validates each file,
+        extracts metadata (FPS, duration), and adds to video list.
+        Shows warning for duplicates or invalid files.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        paths, _ = QFileDialog.getOpenFileNames(self, "Open Videos")
         if paths:
             # Track if any videos were successfully added
             added_count = 0
@@ -651,7 +961,21 @@ class AnnotatorGUI(QMainWindow):
                         self, "Success", f"Added {added_count} videos."
                     )
 
-    def keyPressEvent(self, event):
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Handle keyboard shortcuts for main window.
+
+        Processes:
+            - Space: Toggle play/pause
+            - Enter: Start/stop annotation
+            - Delete/Backspace: Delete selected segment
+            - Behavior hotkeys: Start behavior annotation
+
+        Args:
+            event: The key press event.
+
+        Returns:
+            None
+        """
         if event.isAutoRepeat():
             return
 
@@ -673,7 +997,18 @@ class AnnotatorGUI(QMainWindow):
                     self.start_behavior_annotation(behavior)
                     break
 
-    def keyReleaseEvent(self, event):
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        """Handle keyboard key releases for ending behavior annotations.
+
+        Detects when a behavior hotkey is released and ends the annotation
+        for that behavior.
+
+        Args:
+            event: The key release event.
+
+        Returns:
+            None
+        """
         if event.isAutoRepeat():
             return
 
@@ -683,8 +1018,18 @@ class AnnotatorGUI(QMainWindow):
                 self.stop_behavior_annotation(behavior)
                 break
 
-    def start_behavior_annotation(self, behavior_name):
-        """Start annotation for a specific behavior."""
+    def start_behavior_annotation(self, behavior_name: str) -> None:
+        """Start annotation for a specific behavior at current video position.
+
+        Creates a new BehaviorSegment with start time and frame at current
+        video position. Multiple behaviors can be annotated simultaneously.
+
+        Args:
+            behavior_name: Name of the behavior to start annotating.
+
+        Returns:
+            None
+        """
         if not self.cap:
             return
 
@@ -701,8 +1046,17 @@ class AnnotatorGUI(QMainWindow):
         self.active_hotkeys[behavior_name] = new_seg
         self.timeline.update()
 
-    def stop_behavior_annotation(self, behavior_name):
-        """Stop annotation for a specific behavior."""
+    def stop_behavior_annotation(self, behavior_name: str) -> None:
+        """Stop annotation for a specific behavior at current video position.
+
+        Sets the end time and frame for the active behavior annotation.
+
+        Args:
+            behavior_name: Name of the behavior to stop annotating.
+
+        Returns:
+            None
+        """
         if behavior_name in self.active_hotkeys:
             seg = self.active_hotkeys[behavior_name]
             if seg:
@@ -719,8 +1073,18 @@ class AnnotatorGUI(QMainWindow):
                         "segments"
                     ] = self.timeline.segments.copy()
 
-    def handle_annotation(self):
-        """Handle Enter key annotation (legacy method)."""
+    def handle_annotation(self) -> None:
+        """Handle Enter key annotation (legacy two-press method).
+
+        First press starts annotation, second press ends it.
+        Uses the currently selected behavior from the behavior list.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if not self.behavior_list.currentItem() or not self.cap:
             return
 
@@ -747,7 +1111,18 @@ class AnnotatorGUI(QMainWindow):
                 "segments"
             ] = self.timeline.segments.copy()
 
-    def toggle_play(self):
+    def toggle_play(self) -> None:
+        """Toggle video playback between play and pause states.
+
+        Starts or stops the frame update timer based on current play state.
+        Timer interval is set according to video FPS.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if not self.cap:
             return
 
@@ -758,7 +1133,19 @@ class AnnotatorGUI(QMainWindow):
             self.timer.start(int(1000 / fps))
         self.is_playing = not self.is_playing
 
-    def update_frame(self):
+    def update_frame(self) -> None:
+        """Read and display the next video frame.
+
+        Reads the current frame from video capture, converts to RGB,
+        updates the video label, and updates the timeline playhead.
+        Stops playback when video ends.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if not self.cap:
             return
 
@@ -782,13 +1169,34 @@ class AnnotatorGUI(QMainWindow):
             self.timer.stop()
             self.is_playing = False
 
-    def seek_video(self, time_sec):
+    def seek_video(self, time_sec: float) -> None:
+        """Seek video to a specific time position.
+
+        Sets the video capture position and updates the displayed frame.
+
+        Args:
+            time_sec: Time position in seconds to seek to.
+
+        Returns:
+            None
+        """
         if self.cap:
             self.cap.set(cv2.CAP_PROP_POS_MSEC, time_sec * 1000.0)
             self.update_frame()
 
-    def export_csv(self):
-        """Export all videos and annotations to CSV."""
+    def export_csv(self) -> None:
+        """Export all videos and their annotations to a CSV file.
+
+        Saves current annotations, prompts for file location, and writes
+        a CSV with columns: Video, Behavior, Start_Time, End_Time,
+        Start_Frame, End_Frame. Shows success message when complete.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         # Save current video segments
         if self.current_video_name and self.current_video_name in self.videos:
             self.videos[self.current_video_name][
@@ -797,7 +1205,7 @@ class AnnotatorGUI(QMainWindow):
 
         path, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv)")
         if path:
-            with open(path, "w", newline="") as f:
+            with open(path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow(
                     [
