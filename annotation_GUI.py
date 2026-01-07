@@ -582,33 +582,74 @@ class AnnotatorGUI(QMainWindow):
         return super().eventFilter(obj, event)
 
     def load_video(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open Video")
-        if path:
-            video_name = os.path.basename(path)
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Open Videos"
+        )  # Changed to getOpenFileNames
+        if paths:
+            # Track if any videos were successfully added
+            added_count = 0
+            first_added_name = None
 
-            # Check if already loaded
-            if video_name in self.videos:
-                QMessageBox.warning(self, "Duplicate", "This video is already loaded.")
-                return
+            for path in paths:
+                video_name = os.path.basename(path)
 
-            # Get video properties
-            cap = cv2.VideoCapture(path)
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            duration = total_frames / fps
-            cap.release()
+                # Check if already loaded
+                if video_name in self.videos:
+                    QMessageBox.warning(
+                        self,
+                        "Duplicate",
+                        f"Video '{video_name}' is already loaded. Skipping.",
+                    )
+                    continue
 
-            # Store video data
-            self.videos[video_name] = {
-                "path": path,
-                "segments": [],
-                "duration": duration,
-                "fps": fps,
-            }
+                # Get video properties
+                cap = cv2.VideoCapture(path)
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
 
-            # Add to list
-            self.video_list.addItem(video_name)
-            self.video_list.setCurrentRow(self.video_list.count() - 1)
+                # Validate video
+                if fps == 0 or total_frames == 0:
+                    QMessageBox.warning(
+                        self,
+                        "Invalid Video",
+                        f"Could not load video '{video_name}'. Skipping.",
+                    )
+                    cap.release()
+                    continue
+
+                duration = total_frames / fps
+                cap.release()
+
+                # Store video data
+                self.videos[video_name] = {
+                    "path": path,
+                    "segments": [],
+                    "duration": duration,
+                    "fps": fps,
+                }
+
+                # Add to list
+                self.video_list.addItem(video_name)
+
+                # Track first successfully added video
+                if first_added_name is None:
+                    first_added_name = video_name
+                added_count += 1
+
+            # Switch to first added video if any were added
+            if added_count > 0 and first_added_name:
+                # Find and select the first added video
+                items = self.video_list.findItems(first_added_name, Qt.MatchExactly)
+                if items:
+                    self.video_list.setCurrentItem(items[0])
+
+                # Show success message
+                if added_count == 1:
+                    QMessageBox.information(self, "Success", f"Added 1 video.")
+                else:
+                    QMessageBox.information(
+                        self, "Success", f"Added {added_count} videos."
+                    )
 
     def keyPressEvent(self, event):
         if event.isAutoRepeat():
