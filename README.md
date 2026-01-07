@@ -3,7 +3,8 @@
 
 A PyQt5-based GUI application for annotating animal behavior in videos, inspired by ChronoViz. Supports multiple videos, customizable behaviors, timeline-based annotation with drag-and-drop editing, and CSV export.
 
-![Untitled](https://github.com/user-attachments/assets/0044020f-ff2f-49b6-aaae-41ec9996dc65)
+![pythonbehavior](https://github.com/user-attachments/assets/2cc5a964-d362-4bb4-8034-d7287bd58668)
+
 
 ## Features
 
