@@ -1484,7 +1484,7 @@ class AnnotatorGUI(QMainWindow):
 
                 # Group annotations by video
                 annotations_by_video: Dict[str, List[Dict[str, Any]]] = {}
-                new_behaviors: set = set()
+                csv_behaviors: set = set()
 
                 for row in reader:
                     video_name = row["Video"]
@@ -1495,9 +1495,8 @@ class AnnotatorGUI(QMainWindow):
 
                     annotations_by_video[video_name].append(row)
 
-                    # Track behaviors that might be new
-                    if behavior not in self.behavior_types:
-                        new_behaviors.add(behavior)
+                    # Track all behaviors from CSV
+                    csv_behaviors.add(behavior)
 
         except Exception as e:
             QMessageBox.warning(
@@ -1511,8 +1510,11 @@ class AnnotatorGUI(QMainWindow):
             )
             return
 
-        # Add new behaviors before loading videos
-        for behavior in new_behaviors:
+        # Replace default behaviors with CSV behaviors
+        self.behavior_types.clear()
+        self.behavior_hotkeys.clear()
+
+        for behavior in csv_behaviors:
             self.behavior_types.append(behavior)
 
             # Try to assign a hotkey
@@ -1698,8 +1700,8 @@ class AnnotatorGUI(QMainWindow):
         message = f"Import complete!\n\nVideos loaded: {videos_loaded}"
         if videos_skipped > 0:
             message += f"\nVideos skipped: {videos_skipped}"
-        if new_behaviors:
-            message += f"\nNew behaviors added: {', '.join(new_behaviors)}"
+        if csv_behaviors:
+            message += f"\nBehaviors loaded: {', '.join(csv_behaviors)}"
 
         QMessageBox.information(self, "Import Complete", message)
 
