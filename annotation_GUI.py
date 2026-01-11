@@ -166,6 +166,20 @@ class BehaviorSegment:
                 cls._used_colors.discard(color_tuple)
             del cls._color_map[behavior_name]
 
+    def copy(self) -> "BehaviorSegment":
+        """Create a deep copy of this segment.
+
+        Returns:
+            BehaviorSegment: A new segment with the same values.
+        """
+        return BehaviorSegment(
+            name=self.name,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            start_frame=self.start_frame,
+            end_frame=self.end_frame,
+        )
+
 
 class TimelineWidget(QWidget):
     """Interactive timeline widget for visualizing and editing behavior segments.
@@ -276,13 +290,13 @@ class TimelineWidget(QWidget):
                 x_start = (seg.start_time / self.duration) * w
                 x_end = (
                     (seg.end_time / self.duration) * w
-                    if seg.end_time
+                    if seg.end_time is not None
                     else (self.current_time / self.duration) * w
                 )
 
                 if abs(x - x_start) < self.EDGE_THRESHOLD:
                     return seg, "start"
-                elif seg.end_time and abs(x - x_end) < self.EDGE_THRESHOLD:
+                elif seg.end_time is not None and abs(x - x_end) < self.EDGE_THRESHOLD:
                     return seg, "end"
                 elif x_start <= x <= x_end:
                     return seg, "body"
@@ -322,7 +336,7 @@ class TimelineWidget(QWidget):
             x_start = (seg.start_time / self.duration) * w
             x_end = (
                 (seg.end_time / self.duration) * w
-                if seg.end_time
+                if seg.end_time is not None
                 else (self.current_time / self.duration) * w
             )
 
@@ -563,6 +577,10 @@ class AnnotatorGUI(QMainWindow):
         export_act = QAction("Export All to CSV", self)
         export_act.triggered.connect(self.export_csv)
         file_menu.addAction(export_act)
+
+        import_act = QAction("Import from CSV", self)
+        import_act.triggered.connect(self.import_csv)
+        file_menu.addAction(import_act)
 
         # Behavior menu
         behavior_menu = menubar.addMenu("Behaviors")
@@ -1040,7 +1058,7 @@ class AnnotatorGUI(QMainWindow):
                     if self.current_video_name:
                         self.videos[self.current_video_name][
                             "segments"
-                        ] = self.timeline.segments.copy()
+                        ] = self._deep_copy_segments(self.timeline.segments)
                 return True
             else:
                 # Don't intercept behavior hotkeys when editing table
@@ -1176,11 +1194,11 @@ class AnnotatorGUI(QMainWindow):
             self.handle_annotation()
         elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             if self.timeline.delete_selected_segment():
-                # Update stored segments
+                # Update stored segments (deep copy)
                 if self.current_video_name:
                     self.videos[self.current_video_name][
                         "segments"
-                    ] = self.timeline.segments.copy()
+                    ] = self._deep_copy_segments(self.timeline.segments)
         else:
             # Check for behavior hotkeys
             for behavior, key in self.behavior_hotkeys.items():
@@ -1258,11 +1276,11 @@ class AnnotatorGUI(QMainWindow):
                 self.active_hotkeys[behavior_name] = False
                 self.timeline.update()
 
-                # Update stored segments
+                # Update stored segments (deep copy)
                 if self.current_video_name:
                     self.videos[self.current_video_name][
                         "segments"
-                    ] = self.timeline.segments.copy()
+                    ] = self._deep_copy_segments(self.timeline.segments)
 
     def handle_annotation(self) -> None:
         """Handle Enter key annotation (legacy two-press method).
@@ -1296,11 +1314,11 @@ class AnnotatorGUI(QMainWindow):
             self.current_seg = None
         self.timeline.update()
 
-        # Update stored segments
+        # Update stored segments (deep copy)
         if self.current_video_name:
             self.videos[self.current_video_name][
                 "segments"
-            ] = self.timeline.segments.copy()
+            ] = self._deep_copy_segments(self.timeline.segments)
 
     def toggle_play(self) -> None:
         """Toggle video playback between play and pause states.
@@ -1388,11 +1406,11 @@ class AnnotatorGUI(QMainWindow):
         Returns:
             None
         """
-        # Save current video segments
+        # Save current video segments (deep copy)
         if self.current_video_name and self.current_video_name in self.videos:
             self.videos[self.current_video_name][
                 "segments"
-            ] = self.timeline.segments.copy()
+            ] = self._deep_copy_segments(self.timeline.segments)
 
         path, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv)")
         if path:
@@ -1416,12 +1434,320 @@ class AnnotatorGUI(QMainWindow):
                                 video_name,
                                 seg.name,
                                 seg.start_time,
-                                seg.end_time if seg.end_time else "",
-                                seg.start_frame if seg.start_frame else "",
-                                seg.end_frame if seg.end_frame else "",
+                                seg.end_time if seg.end_time is not None else "",
+                                seg.start_frame if seg.start_frame is not None else "",
+                                seg.end_frame if seg.end_frame is not None else "",
                             ]
                         )
             QMessageBox.information(self, "Success", "Exported successfully!")
+
+    def import_csv(self) -> None:
+        """Import annotations from a CSV file and load associated videos.
+
+        Reads a CSV file exported by this application, prompts user to locate
+        video files if not found, adds any new behaviors, and recreates all
+        annotation segments.
+
+        The CSV format expected:
+            Video, Behavior, Start_Time, End_Time, Start_Frame, End_Frame
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        # Open file dialog to select CSV
+        csv_path, _ = QFileDialog.getOpenFileName(
+            self, "Import CSV", "", "CSV Files (*.csv)"
+        )
+        if not csv_path:
+            return
+
+        csv_dir = os.path.dirname(csv_path)
+
+        # Read and parse CSV
+        try:
+            with open(csv_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+
+                # Validate CSV has required columns
+                required_columns = {"Video", "Behavior", "Start_Time", "End_Time"}
+                if not required_columns.issubset(set(reader.fieldnames or [])):
+                    QMessageBox.warning(
+                        self,
+                        "Invalid CSV",
+                        "CSV file is missing required columns.\n"
+                        "Expected: Video, Behavior, Start_Time, End_Time, Start_Frame, End_Frame",
+                    )
+                    return
+
+                # Group annotations by video
+                annotations_by_video: Dict[str, List[Dict[str, Any]]] = {}
+                csv_behaviors: set = set()
+
+                for row in reader:
+                    video_name = row["Video"]
+                    behavior = row["Behavior"]
+
+                    if video_name not in annotations_by_video:
+                        annotations_by_video[video_name] = []
+
+                    annotations_by_video[video_name].append(row)
+
+                    # Track all behaviors from CSV
+                    csv_behaviors.add(behavior)
+
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Error Reading CSV", f"Failed to read CSV file:\n{str(e)}"
+            )
+            return
+
+        if not annotations_by_video:
+            QMessageBox.information(
+                self, "Empty CSV", "The CSV file contains no annotations."
+            )
+            return
+
+        # Replace default behaviors with CSV behaviors
+        self.behavior_types.clear()
+        self.behavior_hotkeys.clear()
+
+        for behavior in csv_behaviors:
+            self.behavior_types.append(behavior)
+
+            # Try to assign a hotkey
+            hotkey_assigned = False
+            for char in behavior:
+                if char.isalpha():
+                    key_name = char.upper()
+                    key_code = getattr(Qt, f"Key_{key_name}", None)
+                    if key_code and key_code not in self.behavior_hotkeys.values():
+                        self.behavior_hotkeys[behavior] = key_code
+                        hotkey_assigned = True
+                        break
+
+            if not hotkey_assigned:
+                for num in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]:
+                    key_code = getattr(Qt, f"Key_{num}", None)
+                    if key_code and key_code not in self.behavior_hotkeys.values():
+                        self.behavior_hotkeys[behavior] = key_code
+                        break
+
+        # Update behavior UI
+        self.timeline.update_behavior_types(self.behavior_types)
+        self.update_behavior_table()
+        self.update_behavior_list()
+
+        # Process each video
+        videos_loaded = 0
+        videos_skipped = 0
+        video_path_cache: Dict[str, str] = {}  # Cache for located video paths
+
+        for video_name, annotations in annotations_by_video.items():
+            video_path = None
+
+            # Check if video is already loaded
+            if video_name in self.videos:
+                # Video already loaded, just add/merge segments
+                video_path = self.videos[video_name]["path"]
+            else:
+                # Try to find video in CSV directory first
+                potential_path = os.path.join(csv_dir, video_name)
+                if os.path.isfile(potential_path):
+                    video_path = potential_path
+                else:
+                    # Prompt user to locate the video
+                    reply = QMessageBox.question(
+                        self,
+                        "Locate Video",
+                        f"Video '{video_name}' not found in CSV directory.\n"
+                        "Would you like to locate it manually?",
+                        QMessageBox.Yes | QMessageBox.No,
+                    )
+
+                    if reply == QMessageBox.Yes:
+                        located_path, _ = QFileDialog.getOpenFileName(
+                            self,
+                            f"Locate Video: {video_name}",
+                            csv_dir,
+                            "Video Files (*.mp4 *.avi *.mov *.mkv *.wmv);;All Files (*)",
+                        )
+                        if located_path:
+                            video_path = located_path
+                        else:
+                            videos_skipped += 1
+                            continue
+                    else:
+                        videos_skipped += 1
+                        continue
+
+            # Load video if not already loaded
+            if video_name not in self.videos:
+                cap = cv2.VideoCapture(video_path)
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+
+                if fps == 0 or total_frames == 0:
+                    QMessageBox.warning(
+                        self,
+                        "Invalid Video",
+                        f"Could not load video '{video_name}'. Skipping.",
+                    )
+                    cap.release()
+                    videos_skipped += 1
+                    continue
+
+                duration = total_frames / fps
+                cap.release()
+
+                self.videos[video_name] = {
+                    "path": video_path,
+                    "segments": [],
+                    "duration": duration,
+                    "fps": fps,
+                }
+
+                self.video_list.addItem(video_name)
+
+            # Create segments from annotations (REPLACE existing segments)
+            fps = self.videos[video_name]["fps"]
+            imported_segments: List[BehaviorSegment] = []
+
+            for ann in annotations:
+                try:
+                    # Parse start_time (strip whitespace)
+                    start_time_str = str(ann.get("Start_Time", "")).strip()
+                    start_time = float(start_time_str) if start_time_str else 0.0
+
+                    # Parse end_time (strip whitespace, handle empty)
+                    end_time_str = str(ann.get("End_Time", "")).strip()
+                    end_time = float(end_time_str) if end_time_str else None
+
+                    # Parse start_frame
+                    start_frame_str = str(ann.get("Start_Frame", "")).strip()
+                    start_frame = (
+                        int(start_frame_str)
+                        if start_frame_str
+                        else int(start_time * fps)
+                    )
+
+                    # Parse end_frame
+                    end_frame_str = str(ann.get("End_Frame", "")).strip()
+                    end_frame = (
+                        int(end_frame_str)
+                        if end_frame_str
+                        else (int(end_time * fps) if end_time is not None else None)
+                    )
+
+                    segment = BehaviorSegment(
+                        name=ann["Behavior"],
+                        start_time=start_time,
+                        end_time=end_time,
+                        start_frame=start_frame,
+                        end_frame=end_frame,
+                    )
+                    imported_segments.append(segment)
+
+                except (ValueError, KeyError) as e:
+                    # Skip malformed rows
+                    continue
+
+            # Replace the video's segments with imported ones
+            self.videos[video_name]["segments"] = imported_segments
+
+            # Warn if all segments have no end_time (likely incomplete annotations)
+            incomplete_count = sum(
+                1 for seg in imported_segments if seg.end_time is None
+            )
+            if incomplete_count > 0 and incomplete_count == len(imported_segments):
+                QMessageBox.warning(
+                    self,
+                    "Incomplete Annotations",
+                    f"Video '{video_name}': All {incomplete_count} annotations have no end time.\n"
+                    "This may indicate the annotations were not completed before export.",
+                )
+
+            videos_loaded += 1
+
+        # Update timeline height for new behaviors
+        min_height = 20 + len(self.behavior_types) * 45
+        self.timeline.setMinimumHeight(max(150, min_height))
+
+        # Switch to first loaded video if no video is currently selected
+        if self.video_list.count() > 0 and self.current_video_name is None:
+            self.video_list.setCurrentRow(0)
+
+        # Refresh current video's timeline if it was updated
+        if self.current_video_name and self.current_video_name in self.videos:
+            # Stop any active annotations first
+            self._stop_all_active_annotations()
+
+            # Update timeline duration from video data
+            self.timeline.duration = self.videos[self.current_video_name]["duration"]
+            self.timeline.current_time = 0.0
+            self.timeline.segments = self._deep_copy_segments(
+                self.videos[self.current_video_name]["segments"]
+            )
+
+            # Clear active hotkeys to prevent stale references
+            self.active_hotkeys = {behavior: False for behavior in self.behavior_types}
+
+            self.timeline.update()
+
+        # Show summary
+        message = f"Import complete!\n\nVideos loaded: {videos_loaded}"
+        if videos_skipped > 0:
+            message += f"\nVideos skipped: {videos_skipped}"
+        if csv_behaviors:
+            message += f"\nBehaviors loaded: {', '.join(csv_behaviors)}"
+
+        QMessageBox.information(self, "Import Complete", message)
+
+    def _deep_copy_segments(
+        self, segments: List[BehaviorSegment]
+    ) -> List[BehaviorSegment]:
+        """Create deep copies of all segments in a list.
+
+        Args:
+            segments: List of segments to copy.
+
+        Returns:
+            List[BehaviorSegment]: New list with copied segment objects.
+        """
+        return [seg.copy() for seg in segments]
+
+    def _stop_all_active_annotations(self) -> None:
+        """Stop all active annotations by setting their end time.
+
+        This should be called before switching videos to ensure no annotations
+        are left in an incomplete state with end_time=None.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if not self.cap:
+            return
+
+        current_time = self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+        current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+
+        for behavior_name, seg in list(self.active_hotkeys.items()):
+            if seg and seg is not False:
+                # Set end time for the active segment
+                seg.end_time = current_time
+                seg.end_frame = current_frame
+                self.active_hotkeys[behavior_name] = False
+
+        # Also handle legacy current_seg if it exists
+        if self.current_seg is not None:
+            self.current_seg.end_time = current_time
+            self.current_seg.end_frame = current_frame
+            self.current_seg = None
 
     def switch_video(
         self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]
@@ -1441,11 +1767,14 @@ class AnnotatorGUI(QMainWindow):
         if current is None:
             return
 
-        # Save current video segments
+        # Stop any active annotations before switching
+        self._stop_all_active_annotations()
+
+        # Save current video segments (deep copy to isolate from timeline)
         if self.current_video_name and self.current_video_name in self.videos:
             self.videos[self.current_video_name][
                 "segments"
-            ] = self.timeline.segments.copy()
+            ] = self._deep_copy_segments(self.timeline.segments)
 
         # Load new video
         video_name = current.text()
@@ -1460,8 +1789,17 @@ class AnnotatorGUI(QMainWindow):
             # Open new video
             self.cap = cv2.VideoCapture(video_data["path"])
             self.timeline.duration = video_data["duration"]
-            self.timeline.segments = video_data["segments"].copy()
+
+            # Reset current_time to 0 before loading segments
+            self.timeline.current_time = 0.0
+
+            # Deep copy segments to isolate timeline from stored data
+            self.timeline.segments = self._deep_copy_segments(video_data["segments"])
             self.timeline.selected_segment = None
+
+            # Clear active hotkeys to prevent stale references to old segment objects
+            self.active_hotkeys = {behavior: False for behavior in self.behavior_types}
+
             self.timeline.update()
             self.update_frame()
 
@@ -1532,8 +1870,10 @@ class AnnotatorGUI(QMainWindow):
         if segment.end_time is not None:
             segment.end_frame = int(segment.end_time * fps)
 
-        # Save updated segments
-        self.videos[self.current_video_name]["segments"] = self.timeline.segments.copy()
+        # Save updated segments (deep copy)
+        self.videos[self.current_video_name][
+            "segments"
+        ] = self._deep_copy_segments(self.timeline.segments)
 
 
 if __name__ == "__main__":
