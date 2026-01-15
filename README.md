@@ -1,5 +1,5 @@
 # annotation-gui
-# Python Behavior Annotator
+# Python Behavior Segmentation Annotator
 
 A PyQt5-based GUI application for annotating animal behavior in videos, inspired by ChronoViz. Supports multiple videos, customizable behaviors with **editable names and hotkeys**, timeline-based annotation with drag-and-drop editing, and CSV export.
 
