@@ -2,6 +2,9 @@ import pytest
 import csv
 import os
 import tempfile
+
+os.environ.setdefault("ANNOTATION_GUI_NO_AUTOLOAD", "1")
+
 from unittest.mock import Mock, patch, MagicMock
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt, QPoint
@@ -125,8 +128,8 @@ class TestBehaviorSegment:
         Returns:
             None
         """
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
-        assert seg.name == "Immobility"
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
+        assert seg.name == "Immobile"
         assert seg.start_time == 1.0
         assert seg.end_time == 2.0
         assert seg.start_frame == 30
@@ -202,7 +205,7 @@ class TestTimelineWidget:
         assert timeline.duration == 1.0
         assert timeline.current_time == 0.0
         assert len(timeline.segments) == 0
-        assert len(timeline.behavior_types) == 3
+        assert len(timeline.behavior_types) == 5
 
     def test_update_behavior_types(self, qapp):
         """Test updating behavior types.
@@ -232,11 +235,13 @@ class TestTimelineWidget:
             None
         """
         timeline = TimelineWidget()
-        row = timeline.get_behavior_row("Immobility")
-        assert row == 10  # First behavior at y=10
+        origin = timeline.behaviors_origin_y
+        # First behavior row starts at origin (below direction strip).
+        row = timeline.get_behavior_row("Immobile")
+        assert row == origin
 
         row = timeline.get_behavior_row("Rear")
-        assert row == 10 + 45  # Second behavior
+        assert row == origin + (timeline.row_height + 5)
 
     def test_segment_selection(self, qapp):
         """Test segment selection.
@@ -252,7 +257,7 @@ class TestTimelineWidget:
         timeline = TimelineWidget()
         timeline.duration = 10.0
 
-        seg = BehaviorSegment("Immobility", 1.0, 2.0)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0)
         timeline.segments.append(seg)
 
         timeline.selected_segment = seg
@@ -270,7 +275,7 @@ class TestTimelineWidget:
             None
         """
         timeline = TimelineWidget()
-        seg = BehaviorSegment("Immobility", 1.0, 2.0)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0)
         timeline.segments.append(seg)
         timeline.selected_segment = seg
 
@@ -298,7 +303,7 @@ class TestAnnotatorGUI:
         assert window.windowTitle() == "Python Behavior Annotator"
         assert len(window.videos) == 0
         assert window.current_video_name is None
-        assert len(window.behavior_types) == 3
+        assert len(window.behavior_types) == 5
 
     def test_load_single_video(self, gui):
         """Test loading a single video.
@@ -370,7 +375,7 @@ class TestAnnotatorGUI:
             None
         """
         # Add annotation to first video
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
 
         # Create and load second video
@@ -434,12 +439,12 @@ class TestAnnotatorGUI:
         """
         initial_count = len(gui.behavior_types)
 
-        with patch("annotation_GUI.QInputDialog.getText", return_value=("Walk", True)):
+        with patch("annotation_GUI.QInputDialog.getText", return_value=("Sniff", True)):
             gui.add_new_behavior()
 
         assert len(gui.behavior_types) == initial_count + 1
-        assert "Walk" in gui.behavior_types
-        assert "Walk" in gui.behavior_hotkeys
+        assert "Sniff" in gui.behavior_types
+        assert "Sniff" in gui.behavior_hotkeys
 
     def test_delete_behavior(self, gui):
         """Test deleting a behavior.
@@ -454,19 +459,19 @@ class TestAnnotatorGUI:
             None
         """
         # Add a segment
-        seg = BehaviorSegment("Immobility", 1.0, 2.0)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0)
         gui.timeline.segments.append(seg)
         gui.videos[gui.current_video_name]["segments"] = [seg]
 
         with patch(
-            "annotation_GUI.QInputDialog.getItem", return_value=("Immobility", True)
+            "annotation_GUI.QInputDialog.getItem", return_value=("Immobile", True)
         ):
             with patch(
                 "annotation_GUI.QMessageBox.question", return_value=QMessageBox.Yes
             ):
                 gui.delete_behavior()
 
-        assert "Immobility" not in gui.behavior_types
+        assert "Immobile" not in gui.behavior_types
         assert len(gui.timeline.segments) == 0
 
     def test_annotation_with_hotkeys(self, gui):
@@ -486,7 +491,7 @@ class TestAnnotatorGUI:
         QTest.qWait(100)
 
         assert len(gui.timeline.segments) == 1
-        assert gui.timeline.segments[0].name == "Immobility"
+        assert gui.timeline.segments[0].name == "Immobile"
         assert gui.timeline.segments[0].start_time is not None
 
         # Simulate releasing 'I' key
@@ -532,7 +537,7 @@ class TestAnnotatorGUI:
         Returns:
             None
         """
-        seg = BehaviorSegment("Immobility", 1.0, 2.0)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0)
         gui.timeline.segments.append(seg)
         gui.timeline.selected_segment = seg
 
@@ -581,7 +586,7 @@ class TestSegmentModification:
             None
         """
         # Create a segment
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
         gui.timeline.duration = 10.0
 
@@ -605,7 +610,7 @@ class TestSegmentModification:
         Returns:
             None
         """
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
         gui.timeline.duration = 10.0
 
@@ -648,7 +653,8 @@ class TestCSVExport:
             assert len(rows) == 1  # Only header
             assert rows[0] == [
                 "Video",
-                "Behavior",
+                "Track",
+                "Label",
                 "Start_Time",
                 "End_Time",
                 "Start_Frame",
@@ -668,7 +674,7 @@ class TestCSVExport:
             None
         """
         # Add annotation
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
         gui.videos[gui.current_video_name]["segments"] = [seg]
 
@@ -682,11 +688,12 @@ class TestCSVExport:
             reader = csv.reader(f)
             rows = list(reader)
             assert len(rows) == 2  # Header + 1 data row
-            assert rows[1][1] == "Immobility"
-            assert float(rows[1][2]) == 1.0
-            assert float(rows[1][3]) == 2.0
-            assert int(rows[1][4]) == 30
-            assert int(rows[1][5]) == 60
+            assert rows[1][1] == "behavior"
+            assert rows[1][2] == "Immobile"
+            assert float(rows[1][3]) == 1.0
+            assert float(rows[1][4]) == 2.0
+            assert int(rows[1][5]) == 30
+            assert int(rows[1][6]) == 60
 
     def test_export_multiple_annotations(self, gui, temp_csv):
         """Test exporting multiple annotations.
@@ -700,7 +707,7 @@ class TestCSVExport:
         Returns:
             None
         """
-        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg1 = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         seg2 = BehaviorSegment("Rear", 3.0, 4.0, 90, 120)
         seg3 = BehaviorSegment("Groom", 5.0, 6.0, 150, 180)
 
@@ -733,7 +740,7 @@ class TestCSVExport:
             None
         """
         # Add annotation to first video
-        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg1 = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg1)
 
         # Create and load second video
@@ -787,7 +794,7 @@ class TestCSVExport:
             None
         """
         # Create segment
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
 
         # Modify the segment
@@ -805,7 +812,7 @@ class TestCSVExport:
             reader = csv.reader(f)
             rows = list(reader)
             # Check that frame was recalculated: 3.0 * 30 = 90
-            assert int(rows[1][5]) == 90
+            assert int(rows[1][6]) == 90
 
     def test_export_incomplete_segment(self, gui, temp_csv):
         """Test exporting segment without end time.
@@ -820,7 +827,7 @@ class TestCSVExport:
         Returns:
             None
         """
-        seg = BehaviorSegment("Immobility", 1.0, None, 30, None)
+        seg = BehaviorSegment("Immobile", 1.0, None, 30, None)
         gui.timeline.segments.append(seg)
         gui.videos[gui.current_video_name]["segments"] = [seg]
 
@@ -833,8 +840,8 @@ class TestCSVExport:
         with open(temp_csv, "r") as f:
             reader = csv.reader(f)
             rows = list(reader)
-            assert rows[1][3] == ""  # Empty end time
-            assert rows[1][5] == ""  # Empty end frame
+            assert rows[1][4] == ""  # Empty end time
+            assert rows[1][6] == ""  # Empty end frame
 
     def test_export_after_deleting_segment(self, gui, temp_csv):
         """Test CSV export after deleting a segment.
@@ -849,7 +856,7 @@ class TestCSVExport:
             None
         """
         # Add three segments
-        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg1 = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         seg2 = BehaviorSegment("Rear", 3.0, 4.0, 90, 120)
         seg3 = BehaviorSegment("Groom", 5.0, 6.0, 150, 180)
 
@@ -874,8 +881,8 @@ class TestCSVExport:
             assert len(rows) == 3  # Header + 2 remaining segments
 
             # Verify the remaining segments
-            behaviors = [row[1] for row in rows[1:]]
-            assert "Immobility" in behaviors
+            behaviors = [row[2] for row in rows[1:]]
+            assert "Immobile" in behaviors
             assert "Groom" in behaviors
             assert "Rear" not in behaviors
 
@@ -926,7 +933,7 @@ class TestCSVExport:
         window.timeline.duration = 3600.0
 
         # Add annotations at various points throughout the hour
-        seg1 = BehaviorSegment("Immobility", 600.0, 900.0, 18000, 27000)  # 10-15 min
+        seg1 = BehaviorSegment("Immobile", 600.0, 900.0, 18000, 27000)  # 10-15 min
         seg2 = BehaviorSegment("Rear", 1800.0, 2100.0, 54000, 63000)  # 30-35 min
         seg3 = BehaviorSegment("Groom", 3300.0, 3500.0, 99000, 105000)  # 55-58 min
 
@@ -947,13 +954,13 @@ class TestCSVExport:
             assert len(rows) == 4  # Header + 3 segments
 
             # Check that large times are correctly exported
-            assert float(rows[1][2]) == 600.0
-            assert float(rows[1][3]) == 900.0
-            assert int(rows[1][4]) == 18000
-            assert int(rows[1][5]) == 27000
+            assert float(rows[1][3]) == 600.0
+            assert float(rows[1][4]) == 900.0
+            assert int(rows[1][5]) == 18000
+            assert int(rows[1][6]) == 27000
 
-            assert float(rows[3][2]) == 3300.0
-            assert int(rows[3][5]) == 105000
+            assert float(rows[3][3]) == 3300.0
+            assert int(rows[3][6]) == 105000
 
         window.close()
 
@@ -1012,7 +1019,7 @@ class TestCSVExport:
             rows = list(reader)
             assert len(rows) == len(special_behaviors) + 1  # Header + all behaviors
 
-            exported_behaviors = [row[1] for row in rows[1:]]
+            exported_behaviors = [row[2] for row in rows[1:]]
             for behavior in special_behaviors:
                 assert behavior in exported_behaviors
 
@@ -1042,7 +1049,7 @@ class TestCSVExport:
                 return_value=(str(read_only_csv), ""),
             ):
                 # Add a segment
-                seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+                seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
                 gui.timeline.segments.append(seg)
                 gui.videos[gui.current_video_name]["segments"] = [seg]
 
@@ -1072,7 +1079,7 @@ class TestCSVExport:
         nonexistent_path = "/nonexistent/directory/test.csv"
 
         # Add a segment
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
         gui.videos[gui.current_video_name]["segments"] = [seg]
 
@@ -1139,7 +1146,7 @@ class TestCSVExport:
             reader = csv.reader(f)
             rows = list(reader)
 
-            exported_behaviors = [row[1] for row in rows[1:]]
+            exported_behaviors = [row[2] for row in rows[1:]]
             for behavior in unicode_behaviors:
                 assert behavior in exported_behaviors
 
@@ -1158,7 +1165,7 @@ class TestCSVExport:
         """
         # Add segments in non-chronological order
         seg3 = BehaviorSegment("Groom", 5.0, 6.0, 150, 180)
-        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg1 = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         seg2 = BehaviorSegment("Rear", 3.0, 4.0, 90, 120)
 
         # Add in specific order
@@ -1178,9 +1185,9 @@ class TestCSVExport:
             rows = list(reader)
 
             # Check that segments appear in the same order they were added
-            assert rows[1][1] == "Groom"
-            assert rows[2][1] == "Immobility"
-            assert rows[3][1] == "Rear"
+            assert rows[1][2] == "Groom"
+            assert rows[2][2] == "Immobile"
+            assert rows[3][2] == "Rear"
 
     def test_export_with_zero_duration_segment(self, gui, temp_csv):
         """Test exporting segment with zero or very small duration.
@@ -1196,7 +1203,7 @@ class TestCSVExport:
             None
         """
         # Create a segment with very small duration
-        seg = BehaviorSegment("Immobility", 1.0, 1.001, 30, 30)
+        seg = BehaviorSegment("Immobile", 1.0, 1.001, 30, 30)
         gui.timeline.segments.append(seg)
         gui.videos[gui.current_video_name]["segments"] = [seg]
 
@@ -1212,8 +1219,8 @@ class TestCSVExport:
             reader = csv.reader(f)
             rows = list(reader)
             assert len(rows) == 2
-            assert float(rows[1][2]) == 1.0
-            assert float(rows[1][3]) == 1.001
+            assert float(rows[1][3]) == 1.0
+            assert float(rows[1][4]) == 1.001
 
 
 class TestVideoSeek:
@@ -1279,7 +1286,7 @@ class TestUIElements:
         """
         initial_count = gui.behavior_list.count()
 
-        with patch("annotation_GUI.QInputDialog.getText", return_value=("Walk", True)):
+        with patch("annotation_GUI.QInputDialog.getText", return_value=("Sniff", True)):
             gui.add_new_behavior()
 
         assert gui.behavior_list.count() == initial_count + 1
@@ -1338,12 +1345,12 @@ class TestBehaviorTableEditing:
             None
         """
         # Create a segment with original behavior name
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
         gui.videos[gui.current_video_name]["segments"] = [seg]
 
         # Find Immobility in the table (should be row 0)
-        old_name = "Immobility"
+        old_name = "Immobile"
         new_name = "Freezing"
 
         # Get the item and modify it
@@ -1386,7 +1393,7 @@ class TestBehaviorTableEditing:
             None
         """
         # Create segment with original name
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
         gui.videos[gui.current_video_name]["segments"] = [seg]
 
@@ -1408,8 +1415,8 @@ class TestBehaviorTableEditing:
             reader = csv.reader(f)
             rows = list(reader)
             assert len(rows) == 2  # Header + 1 segment
-            assert rows[1][1] == new_name
-            assert rows[1][1] != "Immobility"
+            assert rows[1][2] == new_name
+            assert rows[1][2] != "Immobile"
 
     def test_modify_hotkey_in_table(self, gui):
         """Test modifying a hotkey in the table.
@@ -1424,7 +1431,7 @@ class TestBehaviorTableEditing:
             None
         """
         # Original hotkey for Immobility is 'I' (Qt.Key_I)
-        behavior = "Immobility"
+        behavior = "Immobile"
         old_key = Qt.Key_I
         new_key_text = "M"
         new_key = Qt.Key_M
@@ -1469,7 +1476,7 @@ class TestBehaviorTableEditing:
             None
         """
         # Initial state: Immobility has 'I', Rear has 'R'
-        assert gui.behavior_hotkeys["Immobility"] == Qt.Key_I
+        assert gui.behavior_hotkeys["Immobile"] == Qt.Key_I
         assert gui.behavior_hotkeys["Rear"] == Qt.Key_R
 
         # Try to assign 'I' to Rear (already used by Immobility)
@@ -1513,7 +1520,7 @@ class TestBehaviorTableEditing:
             # Get the item and change it
             name_item = gui.behavior_table.item(rear_row, 0)
             original_text = name_item.text()
-            name_item.setText("Immobility")
+            name_item.setText("Immobile")
 
             # Trigger the change handler
             gui.on_behavior_table_changed(name_item)
@@ -1524,7 +1531,7 @@ class TestBehaviorTableEditing:
 
         # Behavior should remain unchanged
         assert "Rear" in gui.behavior_types
-        assert gui.behavior_types.count("Immobility") == 1
+        assert gui.behavior_types.count("Immobile") == 1
 
         # Item should be reverted to original text
         assert name_item.text() == original_text
@@ -1540,7 +1547,7 @@ class TestBehaviorTableEditing:
         Returns:
             None
         """
-        behavior = "Immobility"
+        behavior = "Immobile"
         assert behavior in gui.behavior_hotkeys
 
         # Clear the hotkey cell
@@ -1636,14 +1643,15 @@ class TestBehaviorTableEditing:
         Returns:
             None
         """
-        # Create segments for all default behaviors
-        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        # Create segments for the first three default behaviors
+        # (Immobile, Rear, Turn at indices 0, 1, 2)
+        seg1 = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         seg2 = BehaviorSegment("Rear", 3.0, 4.0, 90, 120)
-        seg3 = BehaviorSegment("Groom", 5.0, 6.0, 150, 180)
+        seg3 = BehaviorSegment("Turn", 5.0, 6.0, 150, 180)
         gui.timeline.segments.extend([seg1, seg2, seg3])
         gui.videos[gui.current_video_name]["segments"] = [seg1, seg2, seg3]
 
-        # Modify all behavior names
+        # Modify behavior names at indices 0, 1, 2
         new_names = {0: "Freeze", 1: "RearUp", 2: "SelfGroom"}
 
         for row, new_name in new_names.items():
@@ -1672,13 +1680,13 @@ class TestBehaviorTableEditing:
             rows = list(reader)
             assert len(rows) == 4  # Header + 3 segments
 
-            exported_behaviors = {row[1] for row in rows[1:]}
+            exported_behaviors = {row[2] for row in rows[1:]}
             assert exported_behaviors == {"Freeze", "RearUp", "SelfGroom"}
 
             # Verify old names are not present
-            assert "Immobility" not in exported_behaviors
+            assert "Immobile" not in exported_behaviors
             assert "Rear" not in exported_behaviors
-            assert "Groom" not in exported_behaviors
+            assert "Turn" not in exported_behaviors
 
     def test_modify_behavior_updates_all_video_segments(self, gui, tmp_path):
         """Test that modifying a behavior updates segments across all videos.
@@ -1694,7 +1702,7 @@ class TestBehaviorTableEditing:
             None
         """
         # Add segment to first video
-        seg1 = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg1 = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg1)
 
         # Create and load second video
@@ -1716,7 +1724,7 @@ class TestBehaviorTableEditing:
         # Add segment to second video
         gui.video_list.setCurrentRow(1)
         QTest.qWait(100)
-        seg2 = BehaviorSegment("Immobility", 3.0, 4.0, 90, 120)
+        seg2 = BehaviorSegment("Immobile", 3.0, 4.0, 90, 120)
         gui.timeline.segments.append(seg2)
 
         # Switch back to first video
@@ -1755,7 +1763,7 @@ class TestBehaviorTableEditing:
         QTest.qWait(100)
 
         assert len(gui.timeline.segments) == 1
-        assert gui.timeline.segments[0].name == "Immobility"
+        assert gui.timeline.segments[0].name == "Immobile"
 
         # Now modify the behavior name
         new_name = "NotMoving"
@@ -1792,8 +1800,8 @@ class TestBehaviorTableEditing:
             reader = csv.reader(f)
             rows = list(reader)
             assert len(rows) == 3  # Header + 2 segments
-            assert all(row[1] == new_name for row in rows[1:])
-            assert not any(row[1] == "Immobility" for row in rows[1:])
+            assert all(row[2] == new_name for row in rows[1:])
+            assert not any(row[2] == "Immobile" for row in rows[1:])
 
     def test_modify_behavior_preserves_color_mapping(self, gui):
         """Test that modifying a behavior name preserves its color.
@@ -1808,7 +1816,7 @@ class TestBehaviorTableEditing:
             None
         """
         # Create segment and record its color
-        seg = BehaviorSegment("Immobility", 1.0, 2.0, 30, 60)
+        seg = BehaviorSegment("Immobile", 1.0, 2.0, 30, 60)
         gui.timeline.segments.append(seg)
         original_color = seg.color
 
@@ -1824,7 +1832,7 @@ class TestBehaviorTableEditing:
         # Verify color mapping transferred
         assert new_name in BehaviorSegment._color_map
         assert BehaviorSegment._color_map[new_name] == original_color
-        assert "Immobility" not in BehaviorSegment._color_map
+        assert "Immobile" not in BehaviorSegment._color_map
 
     def test_number_keys_as_hotkeys(self, gui):
         """Test that number keys can be assigned as hotkeys.
@@ -1844,13 +1852,13 @@ class TestBehaviorTableEditing:
         gui.on_behavior_table_changed(hotkey_item)
 
         # Verify hotkey assigned
-        assert gui.behavior_hotkeys["Immobility"] == Qt.Key_5
+        assert gui.behavior_hotkeys["Immobile"] == Qt.Key_5
 
         # Test annotation with number key
         QTest.keyPress(gui, Qt.Key_5)
         QTest.qWait(100)
         assert len(gui.timeline.segments) == 1
-        assert gui.timeline.segments[0].name == "Immobility"
+        assert gui.timeline.segments[0].name == "Immobile"
 
         QTest.keyRelease(gui, Qt.Key_5)
         QTest.qWait(100)
@@ -1874,7 +1882,7 @@ class TestBehaviorTableEditing:
         gui.on_behavior_table_changed(hotkey_item)
 
         # Verify stored as uppercase
-        assert gui.behavior_hotkeys["Immobility"] == Qt.Key_M
+        assert gui.behavior_hotkeys["Immobile"] == Qt.Key_M
 
         # Verify display shows uppercase (get fresh item after update)
         updated_item = gui.behavior_table.item(0, 1)
@@ -1898,7 +1906,7 @@ class TestBehaviorTableEditing:
 
         assert len(gui.timeline.segments) == 1
         assert gui.timeline.segments[0].end_time is None
-        assert gui.timeline.segments[0].name == "Immobility"
+        assert gui.timeline.segments[0].name == "Immobile"
 
         # Modify behavior name while annotation is ongoing
         new_name = "ActiveImmobility"
@@ -1936,22 +1944,22 @@ class TestBehaviorTableEditing:
         initial_row_count = gui.behavior_table.rowCount()
 
         # Add a new behavior
-        with patch("annotation_GUI.QInputDialog.getText", return_value=("Walk", True)):
+        with patch("annotation_GUI.QInputDialog.getText", return_value=("Sniff", True)):
             gui.add_new_behavior()
 
         # Verify table updated
         assert gui.behavior_table.rowCount() == initial_row_count + 1
 
-        # Check that "Walk" is in the table
+        # Check that "Sniff" is in the table
         found = False
         for row in range(gui.behavior_table.rowCount()):
-            if gui.behavior_table.item(row, 0).text() == "Walk":
+            if gui.behavior_table.item(row, 0).text() == "Sniff":
                 found = True
                 break
         assert found
 
         # Delete the behavior
-        with patch("annotation_GUI.QInputDialog.getItem", return_value=("Walk", True)):
+        with patch("annotation_GUI.QInputDialog.getItem", return_value=("Sniff", True)):
             with patch(
                 "annotation_GUI.QMessageBox.question", return_value=QMessageBox.Yes
             ):
@@ -1960,9 +1968,9 @@ class TestBehaviorTableEditing:
         # Verify table updated
         assert gui.behavior_table.rowCount() == initial_row_count
 
-        # Check that "Walk" is no longer in the table
+        # Check that "Sniff" is no longer in the table
         for row in range(gui.behavior_table.rowCount()):
-            assert gui.behavior_table.item(row, 0).text() != "Walk"
+            assert gui.behavior_table.item(row, 0).text() != "Sniff"
 
 
 if __name__ == "__main__":

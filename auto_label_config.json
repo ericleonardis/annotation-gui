@@ -1,0 +1,21 @@
+{
+  "bridge_threshold": 0.5,
+  "dir_min_duration": 1.5,
+  "dir_yaw_thresh": 0.03,
+  "forelimb_first": 7,
+  "forelimb_last": 40,
+  "fps": 30.0,
+  "groom_limb": 0.004734213899788781,
+  "hindlimb_first": 41,
+  "hindlimb_last": 73,
+  "immobile_min_duration": 1.0,
+  "min_segment_duration": 0.25,
+  "orient_yaw": 0.015,
+  "rear_z_abs": 0.02293933,
+  "rear_z_delta": 0.03,
+  "short_absorb_threshold": 0.5,
+  "still_hindlimb": 0.0004023083709150494,
+  "still_xy": 0.0009738856669548827,
+  "walk_xy": 0.005,
+  "window": 15
+}
